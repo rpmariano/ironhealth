@@ -50,13 +50,17 @@
   <main id="tab-content" class="flex-1 px-4 pt-4 pb-28 overflow-y-auto"></main>
 
   <nav id="bottomNav" class="fixed bottom-0 left-0 right-0 z-20">
-    <div class="max-w-md mx-auto bg-neutral-900/95 backdrop-blur border-t border-neutral-800 grid grid-cols-3">
+    <div class="max-w-md mx-auto bg-neutral-900/95 backdrop-blur border-t border-neutral-800 grid grid-cols-4">
       <button onclick="switchTab('dashboard')" data-tab="dashboard" class="tab-btn flex flex-col items-center gap-1 py-2.5 text-slate-500 text-[11px] font-medium">
         <i data-lucide="layout-dashboard" class="w-5 h-5"></i>Dashboard
         <span class="tab-dot w-1 h-1 rounded-full bg-yellow-400 opacity-0"></span>
       </button>
       <button onclick="switchTab('registar')" data-tab="registar" class="tab-btn flex flex-col items-center gap-1 py-2.5 text-slate-500 text-[11px] font-medium">
         <i data-lucide="camera" class="w-5 h-5"></i>Registar
+        <span class="tab-dot w-1 h-1 rounded-full bg-yellow-400 opacity-0"></span>
+      </button>
+      <button onclick="switchTab('calendario')" data-tab="calendario" class="tab-btn flex flex-col items-center gap-1 py-2.5 text-slate-500 text-[11px] font-medium">
+        <i data-lucide="calendar-days" class="w-5 h-5"></i>Calendário
         <span class="tab-dot w-1 h-1 rounded-full bg-yellow-400 opacity-0"></span>
       </button>
       <button onclick="switchTab('perfil')" data-tab="perfil" class="tab-btn flex flex-col items-center gap-1 py-2.5 text-slate-500 text-[11px] font-medium">
@@ -118,6 +122,11 @@ let analyzing = false;
 let analyzeError = null;
 let signedUrlCache = {};      // photo_path -> signed url
 let dashChart = null;
+
+let calendarViewMonth = todayISO().slice(0,7);   // 'YYYY-MM' do mês visível
+let calendarSelectedDate = todayISO();
+let calendarCache = {};       // 'YYYY-MM' -> refeições desse mês (meses != atual)
+let calendarLoading = false;
 
 /* ============================= HELPERS ============================= */
 function todayISO(){ return new Date().toISOString().slice(0,10); }
@@ -235,8 +244,98 @@ async function loadAllData(){
   render();
 }
 
+/* ============================= CALENDÁRIO ============================= */
+function shiftMonthKey(monthKey, delta){
+  const [y, m] = monthKey.split('-').map(Number);
+  const d = new Date(y, m - 1 + delta, 1);
+  return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`;
+}
+
+// Devolve as refeições do mês pedido, ou null se ainda não estiverem carregadas.
+// O mês atual usa sempre state.meals (já carregado no login), evitando um pedido
+// redundante; os restantes meses ficam em calendarCache, carregados sob pedido.
+function mealsForMonth(monthKey){
+  if (monthKey === todayISO().slice(0,7)) {
+    return state.meals.filter(m => m.date.slice(0,7) === monthKey);
+  }
+  return calendarCache[monthKey] || null;
+}
+
+async function ensureCalendarMonthLoaded(monthKey){
+  if (mealsForMonth(monthKey) !== null) return;
+  calendarLoading = true; render();
+  try {
+    const [y, m] = monthKey.split('-').map(Number);
+    const start = `${monthKey}-01`;
+    const end = new Date(y, m, 0).toISOString().slice(0,10); // último dia do mês
+    const { data, error } = await sb.from('meals')
+      .select('*, meal_items(*)')
+      .eq('user_id', currentUser.id)
+      .gte('date', start)
+      .lte('date', end)
+      .order('date', { ascending:true });
+    if (error) throw error;
+    calendarCache[monthKey] = data || [];
+  } catch(e) {
+    flashSyncError(e);
+    calendarCache[monthKey] = [];
+  }
+  calendarLoading = false;
+  render();
+}
+
+function changeCalendarMonth(delta){
+  calendarViewMonth = shiftMonthKey(calendarViewMonth, delta);
+  ensureCalendarMonthLoaded(calendarViewMonth);
+  render();
+}
+
+function selectCalendarDay(dateIso){
+  calendarSelectedDate = dateIso;
+  render();
+}
+
+// 'ok' (dentro das metas), 'over' (algum macro excedido), 'none' (sem refeições)
+function dayNutrientStatus(dateIso, monthMeals){
+  const dayMeals = (monthMeals || []).filter(m => m.date === dateIso);
+  if (dayMeals.length === 0) return 'none';
+  const totals = { calories:0, protein:0, carbs:0, fat:0 };
+  dayMeals.forEach(meal => {
+    const n = mealNutrients(meal);
+    totals.calories += n.calories; totals.protein += n.protein;
+    totals.carbs += n.carbs; totals.fat += n.fat;
+  });
+  const p = state.profile || {};
+  const over = MACROS.some(m => totals[m.key] > (Number(p[m.goalKey]) || Infinity));
+  return over ? 'over' : 'ok';
+}
+
+/* Refeições podem viver em state.meals (mês atual) ou em calendarCache (outros
+   meses do Calendário) — estas funções procuram em todas as coleções carregadas
+   para que editar/eliminar funcione também a partir do Calendário. */
+function allLoadedMealArrays(){
+  const arrays = [state.meals];
+  Object.values(calendarCache).forEach(arr => { if (arr) arrays.push(arr); });
+  return arrays;
+}
+function findMealById(id){
+  for (const arr of allLoadedMealArrays()) {
+    const meal = arr.find(m => m.id === id);
+    if (meal) return { meal, array: arr };
+  }
+  return null;
+}
+function findMealByItemId(itemId){
+  for (const arr of allLoadedMealArrays()) {
+    const meal = arr.find(m => (m.meal_items||[]).some(i => i.id === itemId));
+    if (meal) return meal;
+  }
+  return null;
+}
+
 async function updateItemQuantity(itemId, grams){
-  const item = state.meals.flatMap(m => m.meal_items||[]).find(i => i.id === itemId);
+  const meal = findMealByItemId(itemId);
+  const item = meal && meal.meal_items.find(i => i.id === itemId);
   if (!item) return;
   const value = Math.max(0, Number(grams) || 0);
   item.quantity_grams = value;
@@ -248,7 +347,7 @@ async function updateItemQuantity(itemId, grams){
 }
 
 async function deleteMealItem(itemId){
-  const meal = state.meals.find(m => (m.meal_items||[]).some(i => i.id === itemId));
+  const meal = findMealByItemId(itemId);
   if (!meal) return;
   meal.meal_items = meal.meal_items.filter(i => i.id !== itemId);
   render();
@@ -259,9 +358,10 @@ async function deleteMealItem(itemId){
 }
 
 async function deleteMeal(mealId){
-  const meal = state.meals.find(m => m.id === mealId);
-  if (!meal) return;
-  state.meals = state.meals.filter(m => m.id !== mealId);
+  const found = findMealById(mealId);
+  if (!found) return;
+  const { meal, array } = found;
+  array.splice(array.indexOf(meal), 1);
   if (expandedMealId === mealId) expandedMealId = null;
   render();
   try {
@@ -468,6 +568,7 @@ async function signOut(){
 function switchTab(tab){
   activeTab = tab;
   analyzeError = null;
+  if (tab === 'calendario') ensureCalendarMonthLoaded(calendarViewMonth);
   render();
 }
 
@@ -503,6 +604,7 @@ function render(){
   });
   if (activeTab === 'dashboard') main.innerHTML = renderDashboard();
   else if (activeTab === 'registar') main.innerHTML = renderRegistar();
+  else if (activeTab === 'calendario') main.innerHTML = renderCalendario();
   else if (activeTab === 'perfil') main.innerHTML = renderPerfil();
 
   if (window.lucide) lucide.createIcons();
@@ -624,7 +726,7 @@ function renderDashChart(){
 
 /* ============================= REGISTAR ============================= */
 function renderRegistar(){
-  const recent = state.meals.slice(0, 20);
+  const recent = state.meals.slice(0, 4);
 
   return `
     <div class="space-y-4 fade-in">
@@ -636,7 +738,7 @@ function renderRegistar(){
         </div>
 
         ${photos.length ? `
-          <div class="grid grid-cols-3 gap-2 mb-3">
+          <div class="grid grid-cols-3 gap-2 mb-2">
             ${photos.map((p, i) => `
               <div class="relative aspect-square">
                 <img src="${p.dataUrl}" class="w-full h-full object-cover rounded-xl border border-neutral-800" alt="Foto ${i+1}" />
@@ -645,20 +747,20 @@ function renderRegistar(){
                 </button>
               </div>
             `).join('')}
-            ${photos.length < MAX_PHOTOS ? `
-              <label class="aspect-square flex flex-col items-center justify-center border-2 border-dashed border-neutral-700 rounded-xl cursor-pointer hover:border-yellow-400/50 transition text-slate-500">
-                <input type="file" accept="image/*" capture="environment" multiple class="hidden" onchange="onPhotoSelected(this)" />
-                <i data-lucide="plus" class="w-6 h-6"></i>
-                <span class="text-[10px] mt-1">Mais</span>
-              </label>
-            ` : ''}
           </div>
           <div class="flex items-center justify-between mb-3">
             <span class="text-[11px] text-slate-500">${photos.length} foto(s) · máx ${MAX_PHOTOS}</span>
             <button onclick="clearPhotos()" class="text-[11px] text-slate-500 hover:text-red-400 flex items-center gap-1">
-              <i data-lucide="trash-2" class="w-3.5 h-3.5"></i> Limpar
+              <i data-lucide="trash-2" class="w-3.5 h-3.5"></i> Limpar todas
             </button>
           </div>
+          ${photos.length < MAX_PHOTOS ? `
+            <label class="flex items-center justify-center gap-2 border-2 border-dashed border-yellow-400/40 rounded-xl py-3 text-center cursor-pointer hover:border-yellow-400/70 hover:bg-yellow-400/5 transition mb-3">
+              <input type="file" accept="image/*" capture="environment" multiple class="hidden" onchange="onPhotoSelected(this)" />
+              <i data-lucide="image-plus" class="w-5 h-5 text-yellow-400"></i>
+              <span class="text-xs font-semibold text-yellow-400">Tirar/Adicionar outra foto</span>
+            </label>
+          ` : ''}
         ` : `
           <label class="block border-2 border-dashed border-neutral-700 rounded-xl py-8 text-center cursor-pointer hover:border-yellow-400/50 transition mb-3">
             <input type="file" accept="image/*" capture="environment" multiple class="hidden" onchange="onPhotoSelected(this)" />
@@ -694,7 +796,12 @@ function renderRegistar(){
       </div>
 
       <div class="space-y-3">
-        <h2 class="text-xs font-semibold text-slate-500 px-1 uppercase tracking-wide">Refeições recentes</h2>
+        <div class="flex items-center justify-between px-1">
+          <h2 class="text-xs font-semibold text-slate-500 uppercase tracking-wide">Refeições recentes</h2>
+          <button onclick="switchTab('calendario')" class="text-[11px] text-yellow-400 flex items-center gap-1">
+            Ver histórico <i data-lucide="calendar-days" class="w-3.5 h-3.5"></i>
+          </button>
+        </div>
         ${recent.length === 0 ? `<p class="text-xs text-slate-500 px-1">Ainda sem refeições registadas.</p>` : recent.map(renderMealCard).join('')}
       </div>
     </div>
@@ -773,6 +880,87 @@ function renderMealCard(meal){
       </div>` : ''}
     </div>
   `;
+}
+
+/* ============================= CALENDÁRIO ============================= */
+function renderCalendario(){
+  const monthMeals = mealsForMonth(calendarViewMonth);
+  const [y, m] = calendarViewMonth.split('-').map(Number);
+  const firstOfMonth = new Date(y, m - 1, 1);
+  const daysInMonth = new Date(y, m, 0).getDate();
+  const firstWeekday = (firstOfMonth.getDay() + 6) % 7; // 0 = Segunda
+  const monthLabel = `${PT_MONTHS[m-1]} ${y}`;
+  const todayIso = todayISO();
+
+  const cells = Array(firstWeekday).fill(null);
+  for (let d = 1; d <= daysInMonth; d++) {
+    cells.push(`${y}-${String(m).padStart(2,'0')}-${String(d).padStart(2,'0')}`);
+  }
+
+  return `
+    <div class="space-y-4 fade-in">
+      <div class="card rounded-2xl p-4">
+        <div class="flex items-center justify-between mb-4">
+          <button onclick="changeCalendarMonth(-1)" class="p-2 text-slate-400 hover:text-white">
+            <i data-lucide="chevron-left" class="w-5 h-5"></i>
+          </button>
+          <h2 class="text-sm font-bold text-white capitalize">${monthLabel}</h2>
+          <button onclick="changeCalendarMonth(1)" class="p-2 text-slate-400 hover:text-white">
+            <i data-lucide="chevron-right" class="w-5 h-5"></i>
+          </button>
+        </div>
+
+        <div class="grid grid-cols-7 gap-1 mb-1">
+          ${['Seg','Ter','Qua','Qui','Sex','Sáb','Dom'].map(d => `<div class="text-center text-[10px] text-slate-600 font-semibold">${d}</div>`).join('')}
+        </div>
+
+        ${monthMeals === null ? `
+          <div class="flex items-center justify-center h-40 text-slate-500 text-xs gap-2">
+            <i data-lucide="loader-2" class="w-4 h-4 animate-spin"></i> A carregar...
+          </div>
+        ` : `
+        <div class="grid grid-cols-7 gap-1">
+          ${cells.map(dateIso => {
+            if (!dateIso) return `<div></div>`;
+            const status = dayNutrientStatus(dateIso, monthMeals);
+            const isToday = dateIso === todayIso;
+            const isSelected = dateIso === calendarSelectedDate;
+            const dotColor = status === 'ok' ? 'bg-emerald-500' : status === 'over' ? 'bg-red-500' : 'bg-neutral-700';
+            const dayNum = Number(dateIso.slice(8,10));
+            return `
+              <button onclick="selectCalendarDay('${dateIso}')"
+                class="aspect-square flex flex-col items-center justify-center rounded-xl text-xs transition
+                  ${isSelected ? 'bg-yellow-400 text-neutral-950 font-bold' : isToday ? 'border border-yellow-400/60 text-white' : 'text-slate-300 hover:bg-neutral-800'}">
+                ${dayNum}
+                <span class="w-1.5 h-1.5 rounded-full mt-0.5 ${isSelected ? 'bg-neutral-950' : dotColor}"></span>
+              </button>
+            `;
+          }).join('')}
+        </div>
+        `}
+
+        <div class="flex flex-wrap items-center gap-x-3 gap-y-1 mt-4 pt-3 border-t border-neutral-800 text-[10px] text-slate-500">
+          <span class="flex items-center gap-1"><span class="w-2 h-2 rounded-full bg-emerald-500"></span> Objetivos cumpridos</span>
+          <span class="flex items-center gap-1"><span class="w-2 h-2 rounded-full bg-red-500"></span> Excedeu um macro</span>
+          <span class="flex items-center gap-1"><span class="w-2 h-2 rounded-full bg-neutral-700"></span> Sem registos</span>
+        </div>
+      </div>
+
+      <div class="space-y-3">
+        <h2 class="text-xs font-semibold text-slate-500 px-1 uppercase tracking-wide">${formatDatePT(calendarSelectedDate)}</h2>
+        ${renderCalendarDayMeals(monthMeals)}
+      </div>
+    </div>
+  `;
+}
+
+function renderCalendarDayMeals(monthMeals){
+  if (monthMeals === null) return '';
+  const dayMeals = monthMeals
+    .filter(m => m.date === calendarSelectedDate)
+    .sort((a,b) => (a.created_at||'').localeCompare(b.created_at||''));
+  if (dayMeals.length === 0) return `<p class="text-xs text-slate-500 px-1">Sem refeições registadas neste dia.</p>`;
+  return dayMeals.map(renderMealCard).join('');
 }
 
 /* ============================= PERFIL ============================= */

@@ -16,31 +16,19 @@
 
   .card { background:linear-gradient(180deg, rgba(24,24,27,0.9), rgba(15,15,17,0.9)); border:1px solid rgba(63,63,70,0.6); }
 
-  input[type=range].neon-slider { -webkit-appearance:none; appearance:none; width:100%; height:10px; border-radius:9999px; background:#27272a; outline:none; }
-  input[type=range].neon-slider::-webkit-slider-thumb {
-    -webkit-appearance:none; appearance:none; width:26px; height:26px; border-radius:9999px;
-    background:#facc15; border:3px solid #09090b; cursor:pointer;
-    box-shadow:0 0 12px 3px rgba(250,204,21,0.65);
-  }
-  input[type=range].neon-slider::-moz-range-thumb {
-    width:26px; height:26px; border-radius:9999px; background:#facc15; border:3px solid #09090b; cursor:pointer;
-    box-shadow:0 0 12px 3px rgba(250,204,21,0.65);
-  }
-
-  @keyframes alert-flash {
-    0%, 100% { box-shadow:0 0 0 0 rgba(239,68,68,0.55); border-color:rgba(239,68,68,0.9); }
-    50% { box-shadow:0 0 22px 4px rgba(239,68,68,0.55); border-color:rgba(239,68,68,0.4); }
-  }
-  .alert-critical { animation: alert-flash 1.4s ease-in-out infinite; }
-
   .tab-btn.active { color:#facc15; }
   .tab-btn.active .tab-dot { opacity:1; }
 
-  .toggle-btn.active-carn { background:#dc2626; color:#fff; border-color:#dc2626; }
-  .toggle-btn.active-veg { background:#10b981; color:#052e1c; border-color:#10b981; }
+  .range-chip.active { background:#facc15; color:#09090b; border-color:#facc15; }
+  .mealtype-pill.active { background:#facc15; color:#09090b; border-color:#facc15; font-weight:700; }
 
   .fade-in { animation: fadeIn .25s ease-out; }
   @keyframes fadeIn { from { opacity:0; transform:translateY(4px);} to {opacity:1; transform:translateY(0);} }
+
+  @keyframes pulse-soft { 0%,100%{opacity:1;} 50%{opacity:.45;} }
+  .analyzing { animation: pulse-soft 1.2s ease-in-out infinite; }
+
+  input[type=number]::-webkit-inner-spin-button { opacity:1; }
 </style>
 </head>
 <body class="bg-neutral-950 text-slate-200 font-sans antialiased">
@@ -62,21 +50,17 @@
   <main id="tab-content" class="flex-1 px-4 pt-4 pb-28 overflow-y-auto"></main>
 
   <nav id="bottomNav" class="fixed bottom-0 left-0 right-0 z-20">
-    <div class="max-w-md mx-auto bg-neutral-900/95 backdrop-blur border-t border-neutral-800 grid grid-cols-4">
+    <div class="max-w-md mx-auto bg-neutral-900/95 backdrop-blur border-t border-neutral-800 grid grid-cols-3">
       <button onclick="switchTab('dashboard')" data-tab="dashboard" class="tab-btn flex flex-col items-center gap-1 py-2.5 text-slate-500 text-[11px] font-medium">
         <i data-lucide="layout-dashboard" class="w-5 h-5"></i>Dashboard
         <span class="tab-dot w-1 h-1 rounded-full bg-yellow-400 opacity-0"></span>
       </button>
-      <button onclick="switchTab('diario')" data-tab="diario" class="tab-btn flex flex-col items-center gap-1 py-2.5 text-slate-500 text-[11px] font-medium">
-        <i data-lucide="book-open" class="w-5 h-5"></i>Diário
+      <button onclick="switchTab('registar')" data-tab="registar" class="tab-btn flex flex-col items-center gap-1 py-2.5 text-slate-500 text-[11px] font-medium">
+        <i data-lucide="camera" class="w-5 h-5"></i>Registar
         <span class="tab-dot w-1 h-1 rounded-full bg-yellow-400 opacity-0"></span>
       </button>
-      <button onclick="switchTab('graficos')" data-tab="graficos" class="tab-btn flex flex-col items-center gap-1 py-2.5 text-slate-500 text-[11px] font-medium">
-        <i data-lucide="line-chart" class="w-5 h-5"></i>Gráficos
-        <span class="tab-dot w-1 h-1 rounded-full bg-yellow-400 opacity-0"></span>
-      </button>
-      <button onclick="switchTab('coach')" data-tab="coach" class="tab-btn flex flex-col items-center gap-1 py-2.5 text-slate-500 text-[11px] font-medium">
-        <i data-lucide="brain-circuit" class="w-5 h-5"></i>Coach
+      <button onclick="switchTab('perfil')" data-tab="perfil" class="tab-btn flex flex-col items-center gap-1 py-2.5 text-slate-500 text-[11px] font-medium">
+        <i data-lucide="user" class="w-5 h-5"></i>Perfil
         <span class="tab-dot w-1 h-1 rounded-full bg-yellow-400 opacity-0"></span>
       </button>
     </div>
@@ -86,30 +70,37 @@
 
 <script>
 /* ============================= CONFIGURAÇÃO SUPABASE ============================= */
-// 1. Cria um projeto em https://supabase.com
-// 2. Corre o ficheiro supabase_schema.sql no SQL Editor do projeto
-// 3. Cola aqui o URL e a anon key (Project Settings -> API)
 const SUPABASE_URL = 'https://roxfzsiciizkevopgpnl.supabase.co';
 const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InJveGZ6c2ljaWl6a2V2b3BncG5sIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODMyNjg0NDksImV4cCI6MjA5ODg0NDQ0OX0.bS7FyzDIqj4Aov18OXw6SsJrx1hT1DxYQfzmeHHH7bw';
-const isConfigured = !SUPABASE_URL.startsWith('COLA_AQUI') && !SUPABASE_ANON_KEY.startsWith('COLA_AQUI');
-const sb = isConfigured ? supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY) : null;
+const sb = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
 /* ============================= CONSTANTES ============================= */
-const CALORIE_GOAL = 1851;
-const PROTEIN_GOAL = 160;
-const MUSCLE_BASELINE = 65.2;
-const CHECKLIST_ITEMS = [
-  { key:'creatina', label:'Creatina Creapure (5g)', icon:'flask-conical' },
-  { key:'ucii', label:'UC-II Complex (Epicondilite)', icon:'shield-check' },
-  { key:'omega3', label:'Ultra Omega-3 (2 Caps)', icon:'droplet' },
-  { key:'magnesio', label:'Magnésio Bisglicinato (2 Caps)', icon:'moon' },
-  { key:'jefit', label:'Treino Registado no JEFIT', icon:'clipboard-check' },
-  { key:'watch', label:'Galaxy Watch em FCR', icon:'watch' },
+const MEAL_TYPES = [
+  { key:'pequeno-almoco', label:'Pequeno-almoço', icon:'sunrise' },
+  { key:'almoco', label:'Almoço', icon:'sun' },
+  { key:'lanche', label:'Lanche', icon:'cookie' },
+  { key:'jantar', label:'Jantar', icon:'moon' },
+  { key:'ceia', label:'Ceia', icon:'moon-star' },
 ];
 const PT_MONTHS = ['Jan','Fev','Mar','Abr','Mai','Jun','Jul','Ago','Set','Out','Nov','Dez'];
+const MACROS = [
+  { key:'calories', label:'Calorias', unit:'kcal', goalKey:'calorie_goal', color:'#facc15' },
+  { key:'protein', label:'Proteína', unit:'g', goalKey:'protein_goal', color:'#10b981' },
+  { key:'carbs', label:'Hidratos', unit:'g', goalKey:'carbs_goal', color:'#38bdf8' },
+  { key:'fat', label:'Gordura', unit:'g', goalKey:'fat_goal', color:'#fb923c' },
+];
+const MICROS = [
+  { key:'fiber', label:'Fibra', unit:'g' },
+  { key:'sugar', label:'Açúcar', unit:'g' },
+  { key:'sodium', label:'Sódio', unit:'mg' },
+  { key:'iron_mg', label:'Ferro', unit:'mg' },
+  { key:'calcium_mg', label:'Cálcio', unit:'mg' },
+  { key:'vitamin_c_mg', label:'Vit. C', unit:'mg' },
+  { key:'potassium_mg', label:'Potássio', unit:'mg' },
+];
 
-/* ============================= ESTADO (cache local, espelho da BD) ============================= */
-let state = { pain:[], meals:[], bodyMetrics:[], checklist:{}, coachLogs:[] };
+/* ============================= ESTADO ============================= */
+let state = { profile:null, meals:[] }; // meals: [{...meal, meal_items:[...]}]
 let currentUser = null;
 let authMode = 'signin';
 let authError = null;
@@ -117,12 +108,26 @@ let authLoading = false;
 let dataLoading = false;
 let syncError = null;
 
+let activeTab = 'dashboard';
+let activeRange = 'hoje'; // hoje | semana | mes
+let expandedMealId = null;
+let photoDataUrl = null;      // preview da foto escolhida
+let photoBase64 = null;       // base64 comprimido pronto a enviar
+let selectedMealType = 'almoco';
+let analyzing = false;
+let analyzeError = null;
+let signedUrlCache = {};      // photo_path -> signed url
+let dashChart = null;
+
+/* ============================= HELPERS ============================= */
 function todayISO(){ return new Date().toISOString().slice(0,10); }
 function formatDatePT(iso){
   const [y,m,d] = iso.split('-').map(Number);
   return `${String(d).padStart(2,'0')} ${PT_MONTHS[m-1]} ${y}`;
 }
-function uid(){ return Date.now().toString(36) + Math.random().toString(36).slice(2,7); }
+function esc(s){ return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
+function mealTypeLabel(key){ const t = MEAL_TYPES.find(t=>t.key===key); return t ? t.label : key; }
+function mealTypeIcon(key){ const t = MEAL_TYPES.find(t=>t.key===key); return t ? t.icon : 'utensils'; }
 
 function flashSyncError(e){
   console.error(e);
@@ -131,31 +136,96 @@ function flashSyncError(e){
   setTimeout(() => { syncError = null; render(); }, 4000);
 }
 
-function checklistRowToObj(row){
-  const obj = {};
-  CHECKLIST_ITEMS.forEach(i => obj[i.key] = !!row[i.key]);
-  return obj;
+/* Nutrientes de um item, escalados pela quantidade */
+function itemNutrients(item){
+  const f = (item.quantity_grams || 0) / 100;
+  return {
+    calories: f * (item.calories_per_100g || 0),
+    protein: f * (item.protein_per_100g || 0),
+    carbs: f * (item.carbs_per_100g || 0),
+    fat: f * (item.fat_per_100g || 0),
+    fiber: f * (item.fiber_per_100g || 0),
+    sugar: f * (item.sugar_per_100g || 0),
+    sodium: f * (item.sodium_per_100g || 0),
+    iron_mg: f * (item.iron_mg_per_100g || 0),
+    calcium_mg: f * (item.calcium_mg_per_100g || 0),
+    vitamin_c_mg: f * (item.vitamin_c_mg_per_100g || 0),
+    potassium_mg: f * (item.potassium_mg_per_100g || 0),
+  };
+}
+function mealNutrients(meal){
+  const total = { calories:0, protein:0, carbs:0, fat:0, fiber:0, sugar:0, sodium:0, iron_mg:0, calcium_mg:0, vitamin_c_mg:0, potassium_mg:0 };
+  (meal.meal_items || []).forEach(item => {
+    const n = itemNutrients(item);
+    Object.keys(total).forEach(k => total[k] += n[k]);
+  });
+  return total;
 }
 
+/* Intervalos temporais */
+function startOfWeekISO(){
+  const d = new Date();
+  const day = (d.getDay() + 6) % 7; // segunda = 0
+  d.setDate(d.getDate() - day);
+  return d.toISOString().slice(0,10);
+}
+function startOfMonthISO(){
+  const d = new Date();
+  return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-01`;
+}
+function rangeBounds(range){
+  const today = todayISO();
+  if (range === 'hoje') return { start: today, end: today, daysElapsed: 1 };
+  if (range === 'semana') {
+    const start = startOfWeekISO();
+    const days = Math.round((new Date(today) - new Date(start)) / 86400000) + 1;
+    return { start, end: today, daysElapsed: days };
+  }
+  const start = startOfMonthISO();
+  const days = Number(today.slice(8,10));
+  return { start, end: today, daysElapsed: days };
+}
+function mealsInRange(range){
+  const { start, end } = rangeBounds(range);
+  return state.meals.filter(m => m.date >= start && m.date <= end);
+}
+function rangeTotals(range){
+  const total = { calories:0, protein:0, carbs:0, fat:0, fiber:0, sugar:0, sodium:0, iron_mg:0, calcium_mg:0, vitamin_c_mg:0, potassium_mg:0 };
+  mealsInRange(range).forEach(meal => {
+    const n = mealNutrients(meal);
+    Object.keys(total).forEach(k => total[k] += n[k]);
+  });
+  return total;
+}
+
+/* ============================= DADOS ============================= */
 async function loadAllData(){
   dataLoading = true; render();
   try {
     const userId = currentUser.id;
-    const [painRes, mealsRes, bodyRes, checklistRes, coachRes] = await Promise.all([
-      sb.from('pain_logs').select('*').eq('user_id', userId),
-      sb.from('meals').select('*').eq('user_id', userId).order('created_at', { ascending:true }),
-      sb.from('body_metrics').select('*').eq('user_id', userId),
-      sb.from('checklist_days').select('*').eq('user_id', userId),
-      sb.from('coach_logs').select('*').eq('user_id', userId).order('date', { ascending:false }).order('created_at', { ascending:false }),
-    ]);
-    [painRes, mealsRes, bodyRes, checklistRes, coachRes].forEach(r => { if (r.error) throw r.error; });
 
-    state.pain = painRes.data.map(r => ({ date:r.date, value:r.value }));
-    state.meals = mealsRes.data.map(r => ({ id:r.id, date:r.date, name:r.name, protein:Number(r.protein), calories:Number(r.calories), type:r.type }));
-    state.bodyMetrics = bodyRes.data.map(r => ({ date:r.date, weight:Number(r.weight), bodyFat:Number(r.body_fat), muscle:Number(r.muscle) }));
-    state.checklist = {};
-    checklistRes.data.forEach(r => { state.checklist[r.date] = checklistRowToObj(r); });
-    state.coachLogs = coachRes.data.map(r => ({ id:r.id, date:r.date, text:r.text }));
+    // perfil (upsert lazy garante que existe mesmo para contas antigas)
+    let { data: profile, error: pErr } = await sb.from('profiles').select('*').eq('id', userId).maybeSingle();
+    if (pErr) throw pErr;
+    if (!profile) {
+      const { data: created, error: cErr } = await sb.from('profiles')
+        .insert({ id: userId, display_name: (currentUser.email||'').split('@')[0] })
+        .select().single();
+      if (cErr) throw cErr;
+      profile = created;
+    }
+    state.profile = profile;
+
+    // refeições desde o início do mês ou da semana (o mais antigo) — cobre os 3 presets
+    const start = startOfMonthISO() < startOfWeekISO() ? startOfMonthISO() : startOfWeekISO();
+    const { data: meals, error: mErr } = await sb.from('meals')
+      .select('*, meal_items(*)')
+      .eq('user_id', userId)
+      .gte('date', start)
+      .order('date', { ascending:false })
+      .order('created_at', { ascending:false });
+    if (mErr) throw mErr;
+    state.meals = meals || [];
     syncError = null;
   } catch(e) {
     console.error(e);
@@ -165,149 +235,145 @@ async function loadAllData(){
   render();
 }
 
-/* ---- Dor articular ---- */
-function getPainEntry(date){ return state.pain.find(p => p.date === date) || null; }
-async function setPainToday(value){
-  const today = todayISO();
-  const existing = getPainEntry(today);
-  if (existing) existing.value = value; else state.pain.push({ date:today, value });
+async function updateItemQuantity(itemId, grams){
+  const item = state.meals.flatMap(m => m.meal_items||[]).find(i => i.id === itemId);
+  if (!item) return;
+  const value = Math.max(0, Number(grams) || 0);
+  item.quantity_grams = value;
   render();
   try {
-    const { error } = await sb.from('pain_logs').upsert({ user_id: currentUser.id, date: today, value }, { onConflict:'user_id,date' });
+    const { error } = await sb.from('meal_items').update({ quantity_grams: value }).eq('id', itemId);
     if (error) throw error;
   } catch(e) { flashSyncError(e); }
 }
-function sortedPain(){ return [...state.pain].sort((a,b)=> a.date.localeCompare(b.date)); }
 
-/* ---- Refeições ---- */
-function mealsOn(date){ return state.meals.filter(m => m.date === date); }
-async function addMeal(name, protein, calories, type){
-  const today = todayISO();
-  const localEntry = { id: uid(), date: today, name, protein, calories, type };
-  state.meals.push(localEntry);
+async function deleteMealItem(itemId){
+  const meal = state.meals.find(m => (m.meal_items||[]).some(i => i.id === itemId));
+  if (!meal) return;
+  meal.meal_items = meal.meal_items.filter(i => i.id !== itemId);
   render();
   try {
-    const { data, error } = await sb.from('meals').insert({ user_id: currentUser.id, date: today, name, protein, calories, type }).select().single();
+    const { error } = await sb.from('meal_items').delete().eq('id', itemId);
     if (error) throw error;
-    localEntry.id = data.id;
+  } catch(e) { flashSyncError(e); }
+}
+
+async function deleteMeal(mealId){
+  const meal = state.meals.find(m => m.id === mealId);
+  if (!meal) return;
+  state.meals = state.meals.filter(m => m.id !== mealId);
+  if (expandedMealId === mealId) expandedMealId = null;
+  render();
+  try {
+    if (meal.photo_path) await sb.storage.from('meal-photos').remove([meal.photo_path]);
+    const { error } = await sb.from('meals').delete().eq('id', mealId);
+    if (error) throw error;
+  } catch(e) { flashSyncError(e); }
+}
+
+async function saveProfileFromForm(){
+  const get = id => Number(document.getElementById(id).value);
+  const name = document.getElementById('pfName').value.trim();
+  const updates = {
+    display_name: name || state.profile.display_name,
+    calorie_goal: get('pfCal') > 0 ? get('pfCal') : state.profile.calorie_goal,
+    protein_goal: get('pfPro') > 0 ? get('pfPro') : state.profile.protein_goal,
+    carbs_goal: get('pfCarb') > 0 ? get('pfCarb') : state.profile.carbs_goal,
+    fat_goal: get('pfFat') > 0 ? get('pfFat') : state.profile.fat_goal,
+  };
+  Object.assign(state.profile, updates);
+  render();
+  try {
+    const { error } = await sb.from('profiles').update(updates).eq('id', currentUser.id);
+    if (error) throw error;
+    const ok = document.getElementById('pfSaved');
+    if (ok) { ok.classList.remove('hidden'); setTimeout(()=>ok.classList.add('hidden'), 2500); }
+  } catch(e) { flashSyncError(e); }
+}
+
+/* ============================= FOTO + ANÁLISE ============================= */
+function onPhotoSelected(input){
+  const file = input.files && input.files[0];
+  if (!file) return;
+  analyzeError = null;
+  const img = new Image();
+  const reader = new FileReader();
+  reader.onload = () => {
+    img.onload = () => {
+      // comprimir: máx 1280px no lado maior, JPEG q0.8
+      const maxSide = 1280;
+      const scale = Math.min(1, maxSide / Math.max(img.width, img.height));
+      const canvas = document.createElement('canvas');
+      canvas.width = Math.round(img.width * scale);
+      canvas.height = Math.round(img.height * scale);
+      canvas.getContext('2d').drawImage(img, 0, 0, canvas.width, canvas.height);
+      photoDataUrl = canvas.toDataURL('image/jpeg', 0.8);
+      photoBase64 = photoDataUrl.split(',')[1];
+      render();
+    };
+    img.src = reader.result;
+  };
+  reader.readAsDataURL(file);
+}
+
+function clearPhoto(){
+  photoDataUrl = null; photoBase64 = null; analyzeError = null;
+  render();
+}
+
+function selectMealType(key){
+  selectedMealType = key;
+  document.querySelectorAll('.mealtype-pill').forEach(b => b.classList.toggle('active', b.dataset.type === key));
+}
+
+async function analyzeMeal(){
+  if (!photoBase64 || analyzing) return;
+  const date = document.getElementById('mealDate').value || todayISO();
+  analyzing = true; analyzeError = null;
+  render();
+  try {
+    const { data, error } = await sb.functions.invoke('analyze-meal', {
+      body: { image_base64: photoBase64, mime_type: 'image/jpeg', date, meal_type: selectedMealType },
+    });
+    if (error) {
+      let msg = error.message || 'Falha na análise.';
+      // FunctionsHttpError: tentar extrair a mensagem do corpo
+      if (error.context && typeof error.context.json === 'function') {
+        try { const body = await error.context.json(); if (body && body.error) msg = body.error; } catch(_){}
+      }
+      throw new Error(msg);
+    }
+    if (data && data.error) throw new Error(data.error);
+
+    const meal = data.meal;
+    meal.meal_items = data.items || [];
+    state.meals.unshift(meal);
+    state.meals.sort((a,b) => b.date.localeCompare(a.date) || (b.created_at||'').localeCompare(a.created_at||''));
+    photoDataUrl = null; photoBase64 = null;
+    expandedMealId = meal.id;
   } catch(e) {
-    state.meals = state.meals.filter(m => m !== localEntry);
-    flashSyncError(e);
+    console.error(e);
+    analyzeError = e.message || 'Falha na análise. Tenta novamente.';
   }
+  analyzing = false;
   render();
-}
-async function deleteMeal(id){
-  state.meals = state.meals.filter(m => m.id !== id);
-  render();
-  try {
-    const { error } = await sb.from('meals').delete().eq('id', id);
-    if (error) throw error;
-  } catch(e) { flashSyncError(e); }
-}
-function sumField(list, field){ return list.reduce((acc,m)=> acc + (Number(m[field])||0), 0); }
-function dailyNutritionMap(){
-  const map = {};
-  state.meals.forEach(m => {
-    if (!map[m.date]) map[m.date] = { calories:0, protein:0 };
-    map[m.date].calories += Number(m.calories)||0;
-    map[m.date].protein += Number(m.protein)||0;
-  });
-  return map;
 }
 
-/* ---- Composição corporal ---- */
-async function upsertBodyMetric(date, weight, bodyFat, muscle){
-  const existing = state.bodyMetrics.find(b => b.date === date);
-  if (existing) Object.assign(existing, { weight, bodyFat, muscle });
-  else state.bodyMetrics.push({ date, weight, bodyFat, muscle });
+async function toggleMealExpand(mealId){
+  expandedMealId = expandedMealId === mealId ? null : mealId;
   render();
-  try {
-    const { error } = await sb.from('body_metrics').upsert({ user_id: currentUser.id, date, weight, body_fat: bodyFat, muscle }, { onConflict:'user_id,date' });
-    if (error) throw error;
-  } catch(e) { flashSyncError(e); }
-}
-function sortedBodyMetrics(){ return [...state.bodyMetrics].sort((a,b)=> a.date.localeCompare(b.date)); }
-function latestBodyMetric(){ const s = sortedBodyMetrics(); return s.length ? s[s.length-1] : null; }
-
-/* ---- Checklist ---- */
-function getChecklist(date){
-  if (!state.checklist[date]) {
-    const obj = {};
-    CHECKLIST_ITEMS.forEach(i => obj[i.key] = false);
-    state.checklist[date] = obj;
+  if (expandedMealId) {
+    const meal = state.meals.find(m => m.id === mealId);
+    if (meal && meal.photo_path && !signedUrlCache[meal.photo_path]) {
+      try {
+        const { data, error } = await sb.storage.from('meal-photos').createSignedUrl(meal.photo_path, 3600);
+        if (!error && data) { signedUrlCache[meal.photo_path] = data.signedUrl; render(); }
+      } catch(e) { console.warn('signed url', e); }
+    }
   }
-  return state.checklist[date];
-}
-async function toggleChecklistItem(date, key){
-  const c = getChecklist(date);
-  c[key] = !c[key];
-  render();
-  try {
-    const payload = Object.assign({ user_id: currentUser.id, date }, c);
-    const { error } = await sb.from('checklist_days').upsert(payload, { onConflict:'user_id,date' });
-    if (error) throw error;
-  } catch(e) { flashSyncError(e); }
-}
-function isFullyCompliant(date){
-  const c = state.checklist[date];
-  if (!c) return false;
-  return CHECKLIST_ITEMS.every(i => c[i.key]);
-}
-function complianceStreak(){
-  let streak = 0;
-  let cursor = new Date();
-  while (true) {
-    const iso = cursor.toISOString().slice(0,10);
-    if (isFullyCompliant(iso)) { streak++; cursor.setDate(cursor.getDate()-1); }
-    else break;
-  }
-  return streak;
-}
-
-/* ---- Coach logs ---- */
-async function addCoachLog(text){
-  const today = todayISO();
-  const localEntry = { id: uid(), date: today, text };
-  state.coachLogs.unshift(localEntry);
-  render();
-  try {
-    const { data, error } = await sb.from('coach_logs').insert({ user_id: currentUser.id, date: today, text }).select().single();
-    if (error) throw error;
-    localEntry.id = data.id;
-  } catch(e) {
-    state.coachLogs = state.coachLogs.filter(l => l !== localEntry);
-    flashSyncError(e);
-  }
-  render();
-}
-async function deleteCoachLog(id){
-  state.coachLogs = state.coachLogs.filter(l => l.id !== id);
-  render();
-  try {
-    const { error } = await sb.from('coach_logs').delete().eq('id', id);
-    if (error) throw error;
-  } catch(e) { flashSyncError(e); }
 }
 
 /* ============================= AUTENTICAÇÃO ============================= */
-function renderNotConfigured(){
-  return `
-    <div class="min-h-[70vh] flex items-center justify-center px-2">
-      <div class="card rounded-2xl p-5 max-w-sm space-y-3">
-        <div class="flex items-center gap-2">
-          <i data-lucide="settings" class="w-5 h-5 text-yellow-400"></i>
-          <h2 class="text-sm font-bold text-white">Configuração necessária</h2>
-        </div>
-        <p class="text-xs text-slate-400 leading-relaxed">
-          Ainda não ligaste o IronHealth ao Supabase. Edita as constantes
-          <code class="text-yellow-400">SUPABASE_URL</code> e <code class="text-yellow-400">SUPABASE_ANON_KEY</code>
-          no topo do &lt;script&gt; com os valores do teu projeto (Project Settings &rarr; API).
-        </p>
-      </div>
-    </div>
-  `;
-}
-
 function renderAuth(){
   return `
     <div class="min-h-[75vh] flex items-center justify-center px-2 fade-in">
@@ -325,7 +391,7 @@ function renderAuth(){
             class="w-full bg-neutral-900 border border-neutral-800 rounded-xl px-3 py-2 text-sm text-white placeholder-slate-600 outline-none focus:border-yellow-400/60" />
         </div>
 
-        ${authError ? `<p class="text-[11px] text-red-400">${authError}</p>` : ''}
+        ${authError ? `<p class="text-[11px] text-red-400">${esc(authError)}</p>` : ''}
 
         <button onclick="submitAuth()" ${authLoading ? 'disabled' : ''}
           class="w-full bg-yellow-400 text-neutral-950 font-bold text-sm rounded-xl py-2.5 flex items-center justify-center gap-1.5 active:scale-[0.98] transition disabled:opacity-50">
@@ -374,14 +440,10 @@ async function signOut(){
   await sb.auth.signOut();
 }
 
-/* ============================= NAVEGAÇÃO ============================= */
-let activeTab = 'dashboard';
-let lastMealTip = null;
-let charts = { pain:null, body:null, nutrition:null };
-
+/* ============================= RENDER GERAL ============================= */
 function switchTab(tab){
   activeTab = tab;
-  if (tab !== 'diario') lastMealTip = null;
+  analyzeError = null;
   render();
 }
 
@@ -390,14 +452,6 @@ function render(){
   const headerActions = document.getElementById('headerActions');
   const main = document.getElementById('tab-content');
   document.getElementById('header-date').textContent = formatDatePT(todayISO());
-
-  if (!isConfigured) {
-    nav.classList.add('hidden');
-    headerActions.innerHTML = '';
-    main.innerHTML = renderNotConfigured();
-    if (window.lucide) lucide.createIcons();
-    return;
-  }
 
   if (!currentUser) {
     nav.classList.add('hidden');
@@ -412,7 +466,6 @@ function render(){
     ${syncError
       ? `<span class="text-[11px] text-red-400 flex items-center gap-1 bg-red-400/10 border border-red-400/30 px-2 py-1 rounded-full"><i data-lucide="cloud-off" class="w-3.5 h-3.5"></i> erro</span>`
       : `<span class="text-[11px] text-emerald-400 flex items-center gap-1 bg-emerald-400/10 border border-emerald-400/30 px-2 py-1 rounded-full"><i data-lucide="cloud" class="w-3.5 h-3.5"></i> sync</span>`}
-    <button onclick="signOut()" class="text-slate-500 hover:text-red-400"><i data-lucide="log-out" class="w-4 h-4"></i></button>
   `;
 
   if (dataLoading) {
@@ -425,499 +478,308 @@ function render(){
     btn.classList.toggle('active', btn.dataset.tab === activeTab);
   });
   if (activeTab === 'dashboard') main.innerHTML = renderDashboard();
-  else if (activeTab === 'diario') main.innerHTML = renderDiario();
-  else if (activeTab === 'graficos') main.innerHTML = renderGraficos();
-  else if (activeTab === 'coach') main.innerHTML = renderCoach();
+  else if (activeTab === 'registar') main.innerHTML = renderRegistar();
+  else if (activeTab === 'perfil') main.innerHTML = renderPerfil();
 
   if (window.lucide) lucide.createIcons();
-
-  const painEntry = getPainEntry(todayISO());
-  const slider = document.getElementById('painSlider');
-  if (slider) updateSliderVisual(slider, painEntry ? painEntry.value : 0);
-
-  if (activeTab === 'graficos') requestAnimationFrame(renderCharts);
+  if (activeTab === 'dashboard') requestAnimationFrame(renderDashChart);
 }
 
 /* ============================= DASHBOARD ============================= */
-function painColor(v){
-  if (v > 6) return { text:'text-red-500', ring:'border-red-500', bg:'bg-red-500', label:'CRÍTICO' };
-  if (v > 4) return { text:'text-red-400', ring:'border-red-400', bg:'bg-red-400', label:'ALERTA' };
-  if (v >= 2) return { text:'text-yellow-400', ring:'border-yellow-400', bg:'bg-yellow-400', label:'ATENÇÃO' };
-  return { text:'text-emerald-400', ring:'border-emerald-400', bg:'bg-emerald-400', label:'SEGURO' };
-}
-function updateSliderVisual(slider, v){
-  const pct = (v/10)*100;
-  const c = painColor(v);
-  const hex = c.bg.includes('red-500') ? '#ef4444' : c.bg.includes('red-400') ? '#f87171' : c.bg.includes('yellow') ? '#facc15' : '#34d399';
-  slider.style.background = `linear-gradient(to right, ${hex} ${pct}%, #27272a ${pct}%)`;
-}
-function onPainInput(el){
-  const v = Number(el.value);
-  updateSliderVisual(el, v);
-  document.getElementById('painValueLabel').textContent = v;
-  const badge = document.getElementById('painBadge');
-  const c = painColor(v);
-  badge.className = `text-[11px] font-bold px-2 py-0.5 rounded-full border ${c.ring} ${c.text} bg-neutral-950`;
-  badge.textContent = c.label;
-}
-function onPainChange(el){
-  setPainToday(Number(el.value));
+function setRange(range){
+  activeRange = range;
   render();
 }
 
 function renderDashboard(){
-  const today = todayISO();
-  const painEntry = getPainEntry(today);
-  const painVal = painEntry ? painEntry.value : 0;
-  const c = painColor(painVal);
-  const critical = painVal > 4;
+  const profile = state.profile || {};
+  const { daysElapsed } = rangeBounds(activeRange);
+  const totals = rangeTotals(activeRange);
+  const rangeLabel = activeRange === 'hoje' ? 'Hoje' : activeRange === 'semana' ? 'Esta Semana' : 'Este Mês';
 
-  const meals = mealsOn(today);
-  const calToday = sumField(meals, 'calories');
-  const proToday = sumField(meals, 'protein');
-  const calPct = Math.min(100, (calToday/CALORIE_GOAL)*100);
-  const proPct = Math.min(100, (proToday/PROTEIN_GOAL)*100);
-  const overCal = calToday > CALORIE_GOAL;
-
-  const latest = latestBodyMetric();
-  const catabolism = latest && (latest.muscle < MUSCLE_BASELINE * 0.99);
-
-  const streak = complianceStreak();
-  const checklist = getChecklist(today);
-  const doneCount = CHECKLIST_ITEMS.filter(i => checklist[i.key]).length;
-
-  return `
-    <div class="space-y-4 fade-in">
-
-      ${critical ? `
-      <div class="alert-critical rounded-2xl border-2 border-red-500 bg-red-950/40 p-4 flex gap-3">
-        <i data-lucide="alert-triangle" class="w-6 h-6 text-red-400 shrink-0 mt-0.5"></i>
-        <div>
-          <p class="text-red-400 font-bold text-sm tracking-wide">CRÍTICO: Protocolo de Segurança Ativado</p>
-          <p class="text-red-200 text-xs mt-1 leading-relaxed">Treinos <b>PULL bloqueados</b>. Priorizar Pernas / Isometria. Uso obrigatório de <b>STRAPS</b>.</p>
-        </div>
-      </div>` : ''}
-
-      ${catabolism ? `
-      <div class="rounded-2xl border border-orange-500/60 bg-orange-950/30 p-4 flex gap-3">
-        <i data-lucide="trending-down" class="w-6 h-6 text-orange-400 shrink-0 mt-0.5"></i>
-        <div>
-          <p class="text-orange-400 font-bold text-sm tracking-wide">ALERTA DE CATABOLISMO</p>
-          <p class="text-orange-200 text-xs mt-1 leading-relaxed">Massa magra a descer. Aumentar hidratos no pós-treino ou rever intensidade.</p>
-        </div>
-      </div>` : ''}
-
+  const macroCards = MACROS.map(m => {
+    const goal = (Number(profile[m.goalKey]) || 0) * daysElapsed;
+    const consumed = totals[m.key];
+    const remaining = goal - consumed;
+    const pct = goal > 0 ? Math.min(100, (consumed/goal)*100) : 0;
+    const over = remaining < 0;
+    return `
       <div class="card rounded-2xl p-4">
-        <div class="flex items-center justify-between mb-3">
-          <div class="flex items-center gap-2">
-            <i data-lucide="activity" class="w-4 h-4 text-yellow-400"></i>
-            <h2 class="text-sm font-semibold text-white">Semáforo Articular · Cotovelo</h2>
-          </div>
-          <span id="painBadge" class="text-[11px] font-bold px-2 py-0.5 rounded-full border ${c.ring} ${c.text} bg-neutral-950">${c.label}</span>
-        </div>
-        <input id="painSlider" type="range" min="0" max="10" step="1" value="${painVal}"
-          class="neon-slider" oninput="onPainInput(this)" onchange="onPainChange(this)" />
-        <div class="flex justify-between mt-2 text-[11px] text-slate-500">
-          <span>0 · sem dor</span>
-          <span id="painValueLabel" class="text-white font-bold text-sm">${painVal}</span>
-          <span>10 · incapacitante</span>
-        </div>
-      </div>
-
-      <div class="card rounded-2xl p-4 space-y-4">
-        <div class="flex items-center gap-2">
-          <i data-lucide="flame" class="w-4 h-4 text-yellow-400"></i>
-          <h2 class="text-sm font-semibold text-white">Motor Nutricional</h2>
-        </div>
-        <div>
-          <div class="flex justify-between text-xs mb-1">
-            <span class="text-slate-400">Calorias</span>
-            <span class="${overCal ? 'text-red-400' : 'text-slate-300'} font-semibold">${calToday.toFixed(0)} / ${CALORIE_GOAL} kcal</span>
-          </div>
-          <div class="w-full h-2.5 rounded-full bg-neutral-800 overflow-hidden">
-            <div class="h-full rounded-full ${overCal ? 'bg-red-500' : 'bg-yellow-400'}" style="width:${calPct}%"></div>
-          </div>
-        </div>
-        <div>
-          <div class="flex justify-between text-xs mb-1">
-            <span class="text-slate-400">Proteína</span>
-            <span class="text-slate-300 font-semibold">${proToday.toFixed(0)} / ${PROTEIN_GOAL}g</span>
-          </div>
-          <div class="w-full h-2.5 rounded-full bg-neutral-800 overflow-hidden">
-            <div class="h-full rounded-full bg-emerald-500" style="width:${proPct}%"></div>
-          </div>
-        </div>
-      </div>
-
-      <div class="card rounded-2xl p-4">
-        <div class="flex items-center justify-between mb-3">
-          <div class="flex items-center gap-2">
-            <i data-lucide="list-checks" class="w-4 h-4 text-yellow-400"></i>
-            <h2 class="text-sm font-semibold text-white">Checklist do Dia</h2>
-          </div>
-          <span class="text-[11px] font-bold px-2 py-0.5 rounded-full bg-yellow-400/10 border border-yellow-400/40 text-yellow-400">
-            ${doneCount}/${CHECKLIST_ITEMS.length}
+        <div class="flex items-center justify-between mb-1">
+          <span class="text-xs text-slate-400">${m.label}</span>
+          <span class="text-[10px] px-1.5 py-0.5 rounded-full ${over ? 'bg-red-500/15 text-red-400 border border-red-500/40' : 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/30'}">
+            ${over ? `${Math.abs(remaining).toFixed(0)} ${m.unit} acima` : `restam ${remaining.toFixed(0)} ${m.unit}`}
           </span>
         </div>
-        <div class="space-y-2">
-          ${CHECKLIST_ITEMS.map(item => `
-            <button onclick="toggleChecklistItem('${today}','${item.key}')"
-              class="w-full flex items-center gap-3 px-3 py-2 rounded-xl border ${checklist[item.key] ? 'border-emerald-500/50 bg-emerald-500/10' : 'border-neutral-800 bg-neutral-900/60'} text-left transition">
-              <div class="w-5 h-5 rounded-md border flex items-center justify-center shrink-0 ${checklist[item.key] ? 'bg-emerald-500 border-emerald-500' : 'border-neutral-600'}">
-                ${checklist[item.key] ? '<i data-lucide="check" class="w-3.5 h-3.5 text-neutral-950"></i>' : ''}
-              </div>
-              <i data-lucide="${item.icon}" class="w-4 h-4 ${checklist[item.key] ? 'text-emerald-400' : 'text-slate-500'} shrink-0"></i>
-              <span class="text-xs ${checklist[item.key] ? 'text-emerald-200' : 'text-slate-300'}">${item.label}</span>
-            </button>
-          `).join('')}
-        </div>
-        <div class="mt-3 flex items-center gap-2 text-[11px] text-slate-500">
-          <i data-lucide="flame" class="w-3.5 h-3.5 text-yellow-400"></i>
-          Streak de conformidade total: <b class="text-white">${streak} dia(s)</b>
+        <p class="text-lg font-bold text-white leading-none mb-2">${consumed.toFixed(0)}<span class="text-[11px] text-slate-500 font-normal"> / ${goal.toFixed(0)} ${m.unit}</span></p>
+        <div class="w-full h-2 rounded-full bg-neutral-800 overflow-hidden">
+          <div class="h-full rounded-full" style="width:${pct}%; background:${over ? '#ef4444' : m.color}"></div>
         </div>
       </div>
+    `;
+  }).join('');
+
+  const microRows = MICROS.map(mi => `
+    <div class="flex justify-between py-1.5 border-b border-neutral-900 last:border-0">
+      <span class="text-xs text-slate-400">${mi.label}</span>
+      <span class="text-xs text-white font-semibold">${totals[mi.key].toFixed(mi.unit==='mg'?0:1)} ${mi.unit}</span>
+    </div>
+  `).join('');
+
+  return `
+    <div class="space-y-4 fade-in">
+      <div class="flex gap-2">
+        ${['hoje','semana','mes'].map(r => `
+          <button onclick="setRange('${r}')"
+            class="range-chip ${activeRange===r?'active':''} flex-1 border border-neutral-700 rounded-xl py-2 text-xs font-semibold text-slate-300 transition">
+            ${r==='hoje'?'Hoje':r==='semana'?'Esta Semana':'Este Mês'}
+          </button>
+        `).join('')}
+      </div>
+
+      <p class="text-[11px] text-slate-500 px-1">${rangeLabel} · meta proporcional a ${daysElapsed} dia(s)</p>
+
+      <div class="grid grid-cols-2 gap-3">${macroCards}</div>
 
       <div class="card rounded-2xl p-4">
         <div class="flex items-center gap-2 mb-3">
-          <i data-lucide="scale" class="w-4 h-4 text-yellow-400"></i>
-          <h2 class="text-sm font-semibold text-white">Recomposição Corporal</h2>
+          <i data-lucide="bar-chart-3" class="w-4 h-4 text-yellow-400"></i>
+          <h2 class="text-sm font-semibold text-white">Calorias por Dia</h2>
         </div>
-        ${latest ? `
-        <div class="grid grid-cols-3 gap-2 text-center">
-          <div class="bg-neutral-900/60 rounded-xl py-2">
-            <p class="text-[10px] text-slate-500">Peso</p>
-            <p class="text-sm font-bold text-white">${latest.weight} kg</p>
-          </div>
-          <div class="bg-neutral-900/60 rounded-xl py-2">
-            <p class="text-[10px] text-slate-500">BF%</p>
-            <p class="text-sm font-bold text-white">${latest.bodyFat}%</p>
-          </div>
-          <div class="bg-neutral-900/60 rounded-xl py-2">
-            <p class="text-[10px] text-slate-500">Massa Musc.</p>
-            <p class="text-sm font-bold ${catabolism ? 'text-orange-400' : 'text-emerald-400'}">${latest.muscle} kg</p>
-          </div>
-        </div>
-        <p class="text-[10px] text-slate-500 mt-2">Última atualização: ${formatDatePT(latest.date)} · baseline massa muscular ${MUSCLE_BASELINE}kg</p>
-        ` : `<p class="text-xs text-slate-500">Sem registos ainda. Adiciona a tua primeira medição no Diário.</p>`}
+        ${state.meals.length ? `<canvas id="dashChart" height="190"></canvas>` : `<p class="text-xs text-slate-500">Regista a tua primeira refeição para veres o gráfico.</p>`}
       </div>
 
+      <div class="card rounded-2xl p-4">
+        <div class="flex items-center gap-2 mb-2">
+          <i data-lucide="microscope" class="w-4 h-4 text-yellow-400"></i>
+          <h2 class="text-sm font-semibold text-white">Micronutrientes · ${rangeLabel}</h2>
+        </div>
+        ${microRows}
+      </div>
     </div>
   `;
 }
 
-/* ============================= DIÁRIO ============================= */
-let selectedMealType = 'carnivora';
-function selectMealType(type){
-  selectedMealType = type;
-  document.getElementById('btnCarn').classList.toggle('active-carn', type==='carnivora');
-  document.getElementById('btnVeg').classList.toggle('active-veg', type==='vegetariana');
-}
-async function addMealFromForm(){
-  const nameEl = document.getElementById('mealName');
-  const proteinEl = document.getElementById('mealProtein');
-  const caloriesEl = document.getElementById('mealCalories');
-  const errEl = document.getElementById('mealFormError');
+function renderDashChart(){
+  const canvas = document.getElementById('dashChart');
+  if (!canvas) return;
+  if (dashChart) { dashChart.destroy(); dashChart = null; }
 
-  const name = nameEl.value.trim();
-  const protein = Number(proteinEl.value);
-  const calories = Number(caloriesEl.value);
-
-  if (!name || isNaN(protein) || isNaN(calories) || protein < 0 || calories < 0) {
-    errEl.textContent = 'Preenche nome, proteína e calorias com valores válidos.';
-    errEl.classList.remove('hidden');
-    return;
+  const { start, end } = rangeBounds(activeRange);
+  const byDay = {};
+  for (let d = new Date(start); d.toISOString().slice(0,10) <= end; d.setDate(d.getDate()+1)) {
+    byDay[d.toISOString().slice(0,10)] = 0;
   }
-  errEl.classList.add('hidden');
-  lastMealTip = selectedMealType === 'vegetariana' ? 'veg' : 'carn';
-  await addMeal(name, protein, calories, selectedMealType);
+  state.meals.forEach(meal => {
+    if (meal.date >= start && meal.date <= end) {
+      byDay[meal.date] = (byDay[meal.date] || 0) + mealNutrients(meal).calories;
+    }
+  });
+  const days = Object.keys(byDay).sort();
+  const goal = Number(state.profile?.calorie_goal) || 0;
+
+  Chart.defaults.color = '#a1a1aa';
+  dashChart = new Chart(canvas, {
+    data: {
+      labels: days.map(d => d.slice(8,10) + '/' + d.slice(5,7)),
+      datasets: [
+        { type:'bar', label:'Calorias', data:days.map(d=>byDay[d]), backgroundColor:'rgba(250,204,21,0.6)', borderRadius:4 },
+        { type:'line', label:'Meta', data:days.map(()=>goal), borderColor:'#ef4444', borderDash:[6,4], pointRadius:0, borderWidth:1.5 },
+      ]
+    },
+    options: {
+      responsive:true,
+      plugins:{ legend:{ labels:{ boxWidth:10, font:{size:10} } } },
+      scales: {
+        y: { beginAtZero:true, grid:{ color:'rgba(63,63,70,0.4)' } },
+        x: { grid:{ display:false } }
+      }
+    }
+  });
 }
-async function saveBodyMetricsFromForm(){
-  const weightEl = document.getElementById('bmWeight');
-  const bfEl = document.getElementById('bmBodyFat');
-  const muscleEl = document.getElementById('bmMuscle');
-  const errEl = document.getElementById('bmFormError');
 
-  const weight = Number(weightEl.value);
-  const bodyFat = Number(bfEl.value);
-  const muscle = Number(muscleEl.value);
-
-  if (isNaN(weight) || isNaN(bodyFat) || isNaN(muscle) || weight<=0 || bodyFat<0 || muscle<=0) {
-    errEl.textContent = 'Preenche peso, %BF e massa muscular com valores válidos.';
-    errEl.classList.remove('hidden');
-    return;
-  }
-  errEl.classList.add('hidden');
-  await upsertBodyMetric(todayISO(), weight, bodyFat, muscle);
-}
-
-function renderDiario(){
-  const today = todayISO();
-  const meals = mealsOn(today).slice().reverse();
-  const recentMetrics = sortedBodyMetrics().slice(-7).reverse();
-  const existingToday = state.bodyMetrics.find(b => b.date === today);
+/* ============================= REGISTAR ============================= */
+function renderRegistar(){
+  const recent = state.meals.slice(0, 20);
 
   return `
     <div class="space-y-4 fade-in">
 
       <div class="card rounded-2xl p-4">
         <div class="flex items-center gap-2 mb-3">
-          <i data-lucide="utensils" class="w-4 h-4 text-yellow-400"></i>
+          <i data-lucide="camera" class="w-4 h-4 text-yellow-400"></i>
           <h2 class="text-sm font-semibold text-white">Nova Refeição</h2>
         </div>
-        <div class="space-y-2">
-          <input id="mealName" type="text" placeholder="Nome do alimento / refeição"
-            class="w-full bg-neutral-900 border border-neutral-800 rounded-xl px-3 py-2 text-sm text-white placeholder-slate-600 outline-none focus:border-yellow-400/60" />
-          <div class="grid grid-cols-2 gap-2">
-            <input id="mealProtein" type="number" min="0" placeholder="Proteína (g)"
-              class="w-full bg-neutral-900 border border-neutral-800 rounded-xl px-3 py-2 text-sm text-white placeholder-slate-600 outline-none focus:border-yellow-400/60" />
-            <input id="mealCalories" type="number" min="0" placeholder="Calorias (kcal)"
-              class="w-full bg-neutral-900 border border-neutral-800 rounded-xl px-3 py-2 text-sm text-white placeholder-slate-600 outline-none focus:border-yellow-400/60" />
-          </div>
-          <div class="grid grid-cols-2 gap-2">
-            <button id="btnCarn" onclick="selectMealType('carnivora')" type="button"
-              class="toggle-btn active-carn border border-neutral-700 rounded-xl py-2 text-xs font-semibold text-slate-300 flex items-center justify-center gap-1.5">
-              <i data-lucide="beef" class="w-3.5 h-3.5"></i> Carnívora
-            </button>
-            <button id="btnVeg" onclick="selectMealType('vegetariana')" type="button"
-              class="toggle-btn border border-neutral-700 rounded-xl py-2 text-xs font-semibold text-slate-300 flex items-center justify-center gap-1.5">
-              <i data-lucide="leaf" class="w-3.5 h-3.5"></i> Vegetariana
+
+        ${photoDataUrl ? `
+          <div class="relative mb-3">
+            <img src="${photoDataUrl}" class="w-full rounded-xl border border-neutral-800" alt="Foto da refeição" />
+            <button onclick="clearPhoto()" class="absolute top-2 right-2 bg-neutral-950/80 border border-neutral-700 rounded-full p-1.5 text-slate-300">
+              <i data-lucide="x" class="w-4 h-4"></i>
             </button>
           </div>
-          <p id="mealFormError" class="hidden text-[11px] text-red-400"></p>
-          <button onclick="addMealFromForm()" class="w-full bg-yellow-400 text-neutral-950 font-bold text-sm rounded-xl py-2.5 flex items-center justify-center gap-1.5 active:scale-[0.98] transition">
-            <i data-lucide="plus" class="w-4 h-4"></i> Adicionar Refeição
-          </button>
+        ` : `
+          <label class="block border-2 border-dashed border-neutral-700 rounded-xl py-8 text-center cursor-pointer hover:border-yellow-400/50 transition mb-3">
+            <input type="file" accept="image/*" capture="environment" class="hidden" onchange="onPhotoSelected(this)" />
+            <i data-lucide="image-plus" class="w-8 h-8 text-slate-600 mx-auto mb-2"></i>
+            <p class="text-xs text-slate-400 font-medium">Tira ou escolhe uma foto da refeição</p>
+            <p class="text-[10px] text-slate-600 mt-1">A IA identifica os alimentos e estima os nutrientes</p>
+          </label>
+        `}
+
+        <div class="grid grid-cols-2 gap-2 mb-2">
+          <input id="mealDate" type="date" value="${todayISO()}" max="${todayISO()}"
+            class="w-full bg-neutral-900 border border-neutral-800 rounded-xl px-3 py-2 text-sm text-white outline-none focus:border-yellow-400/60" />
+          <div class="flex items-center justify-center text-[11px] text-slate-500">Data da refeição</div>
         </div>
 
-        ${lastMealTip === 'veg' ? `
-        <div class="mt-3 flex gap-2 items-start bg-emerald-500/10 border border-emerald-500/30 rounded-xl p-3">
-          <i data-lucide="sparkles" class="w-4 h-4 text-emerald-400 shrink-0 mt-0.5"></i>
-          <p class="text-[11px] text-emerald-200 leading-relaxed">Dica de aminoácidos: garante a combinação de <b>leguminosas + cereais</b> para um perfil proteico completo.</p>
-        </div>` : ''}
-
-        <div class="mt-4 space-y-2">
-          ${meals.length === 0 ? `<p class="text-xs text-slate-500">Ainda sem refeições hoje.</p>` : meals.map(m => `
-            <div class="flex items-center justify-between bg-neutral-900/60 border border-neutral-800 rounded-xl px-3 py-2">
-              <div class="flex items-center gap-2 min-w-0">
-                <i data-lucide="${m.type === 'vegetariana' ? 'leaf' : 'beef'}" class="w-4 h-4 ${m.type === 'vegetariana' ? 'text-emerald-400' : 'text-red-400'} shrink-0"></i>
-                <div class="min-w-0">
-                  <p class="text-xs font-semibold text-white truncate">${m.name}</p>
-                  <p class="text-[10px] text-slate-500">${m.protein}g proteína · ${m.calories} kcal</p>
-                </div>
-              </div>
-              <button onclick="deleteMeal('${m.id}')" class="text-slate-600 hover:text-red-400 shrink-0 ml-2">
-                <i data-lucide="trash-2" class="w-4 h-4"></i>
-              </button>
-            </div>
+        <div class="flex flex-wrap gap-1.5 mb-3">
+          ${MEAL_TYPES.map(t => `
+            <button onclick="selectMealType('${t.key}')" data-type="${t.key}" type="button"
+              class="mealtype-pill ${selectedMealType===t.key?'active':''} border border-neutral-700 rounded-full px-3 py-1.5 text-[11px] text-slate-300 transition">
+              ${t.label}
+            </button>
           `).join('')}
         </div>
-      </div>
 
-      <div class="card rounded-2xl p-4">
-        <div class="flex items-center gap-2 mb-3">
-          <i data-lucide="ruler" class="w-4 h-4 text-yellow-400"></i>
-          <h2 class="text-sm font-semibold text-white">Telemetria Corporal (hoje)</h2>
-        </div>
-        <div class="grid grid-cols-3 gap-2">
-          <input id="bmWeight" type="number" step="0.1" placeholder="Peso (kg)" value="${existingToday ? existingToday.weight : ''}"
-            class="w-full bg-neutral-900 border border-neutral-800 rounded-xl px-2 py-2 text-sm text-white placeholder-slate-600 outline-none focus:border-yellow-400/60" />
-          <input id="bmBodyFat" type="number" step="0.1" placeholder="BF %" value="${existingToday ? existingToday.bodyFat : ''}"
-            class="w-full bg-neutral-900 border border-neutral-800 rounded-xl px-2 py-2 text-sm text-white placeholder-slate-600 outline-none focus:border-yellow-400/60" />
-          <input id="bmMuscle" type="number" step="0.1" placeholder="Músculo (kg)" value="${existingToday ? existingToday.muscle : ''}"
-            class="w-full bg-neutral-900 border border-neutral-800 rounded-xl px-2 py-2 text-sm text-white placeholder-slate-600 outline-none focus:border-yellow-400/60" />
-        </div>
-        <p id="bmFormError" class="hidden text-[11px] text-red-400 mt-2"></p>
-        <button onclick="saveBodyMetricsFromForm()" class="mt-2 w-full bg-emerald-500 text-neutral-950 font-bold text-sm rounded-xl py-2.5 flex items-center justify-center gap-1.5 active:scale-[0.98] transition">
-          <i data-lucide="save" class="w-4 h-4"></i> Guardar Medição
-        </button>
+        ${analyzeError ? `<p class="text-[11px] text-red-400 mb-2">${esc(analyzeError)}</p>` : ''}
 
-        ${recentMetrics.length > 0 ? `
-        <div class="mt-4 overflow-x-auto">
-          <table class="w-full text-[11px]">
-            <thead>
-              <tr class="text-slate-500 border-b border-neutral-800">
-                <th class="text-left py-1.5">Data</th><th class="text-right">Peso</th><th class="text-right">BF%</th><th class="text-right">Músculo</th>
-              </tr>
-            </thead>
-            <tbody>
-              ${recentMetrics.map(b => `
-                <tr class="border-b border-neutral-900">
-                  <td class="py-1.5 text-slate-400">${formatDatePT(b.date)}</td>
-                  <td class="text-right text-white">${b.weight}</td>
-                  <td class="text-right text-white">${b.bodyFat}</td>
-                  <td class="text-right text-white">${b.muscle}</td>
-                </tr>
-              `).join('')}
-            </tbody>
-          </table>
-        </div>` : ''}
-      </div>
-
-    </div>
-  `;
-}
-
-/* ============================= GRÁFICOS ============================= */
-function renderGraficos(){
-  const hasPain = state.pain.length > 0;
-  const hasBody = state.bodyMetrics.length > 0;
-  const hasNutrition = Object.keys(dailyNutritionMap()).length > 0;
-
-  return `
-    <div class="space-y-4 fade-in">
-      <div class="card rounded-2xl p-4">
-        <div class="flex items-center gap-2 mb-3">
-          <i data-lucide="activity" class="w-4 h-4 text-yellow-400"></i>
-          <h2 class="text-sm font-semibold text-white">Dor vs. Carga de Treino</h2>
-        </div>
-        ${hasPain ? `<canvas id="chartPain" height="200"></canvas>` : `<p class="text-xs text-slate-500">Regista o nível de dor no Dashboard para veres o gráfico aqui.</p>`}
-      </div>
-
-      <div class="card rounded-2xl p-4">
-        <div class="flex items-center gap-2 mb-3">
-          <i data-lucide="scale" class="w-4 h-4 text-yellow-400"></i>
-          <h2 class="text-sm font-semibold text-white">Peso Total vs. Massa Muscular</h2>
-        </div>
-        ${hasBody ? `<canvas id="chartBody" height="200"></canvas>` : `<p class="text-xs text-slate-500">Regista peso, BF% e massa muscular no Diário para veres o gráfico aqui.</p>`}
-      </div>
-
-      <div class="card rounded-2xl p-4">
-        <div class="flex items-center gap-2 mb-3">
-          <i data-lucide="flame" class="w-4 h-4 text-yellow-400"></i>
-          <h2 class="text-sm font-semibold text-white">Calorias & Proteína Diárias</h2>
-        </div>
-        ${hasNutrition ? `<canvas id="chartNutrition" height="200"></canvas>` : `<p class="text-xs text-slate-500">Adiciona refeições no Diário para veres a tendência aqui.</p>`}
-      </div>
-    </div>
-  `;
-}
-
-function renderCharts(){
-  const gridColor = 'rgba(63,63,70,0.4)';
-  const tickColor = '#a1a1aa';
-  Chart.defaults.color = tickColor;
-  Chart.defaults.font.family = "system-ui, sans-serif";
-
-  if (charts.pain) { charts.pain.destroy(); charts.pain = null; }
-  if (charts.body) { charts.body.destroy(); charts.body = null; }
-  if (charts.nutrition) { charts.nutrition.destroy(); charts.nutrition = null; }
-
-  const painCanvas = document.getElementById('chartPain');
-  if (painCanvas) {
-    const pain = sortedPain();
-    const labels = pain.map(p => formatDatePT(p.date));
-    const values = pain.map(p => p.value);
-    const load = pain.map(p => {
-      const c = state.checklist[p.date];
-      return c && c.jefit ? 10 : 0;
-    });
-    charts.pain = new Chart(painCanvas, {
-      data: {
-        labels,
-        datasets: [
-          { type:'bar', label:'Treino (JEFIT)', data:load, backgroundColor:'rgba(250,204,21,0.25)', borderRadius:4, yAxisID:'y' },
-          { type:'line', label:'Dor (0-10)', data:values, borderColor:'#ef4444', backgroundColor:'#ef4444', tension:0.3, pointRadius:3, yAxisID:'y' },
-        ]
-      },
-      options: {
-        responsive:true,
-        plugins:{ legend:{ labels:{ boxWidth:10, font:{size:10} } } },
-        scales: {
-          y: { min:0, max:10, grid:{ color:gridColor }, ticks:{ stepSize:2 } },
-          x: { grid:{ display:false } }
-        }
-      }
-    });
-  }
-
-  const bodyCanvas = document.getElementById('chartBody');
-  if (bodyCanvas) {
-    const bm = sortedBodyMetrics();
-    const labels = bm.map(b => formatDatePT(b.date));
-    charts.body = new Chart(bodyCanvas, {
-      type:'line',
-      data:{
-        labels,
-        datasets:[
-          { label:'Peso Total (kg)', data:bm.map(b=>b.weight), borderColor:'#facc15', backgroundColor:'#facc15', yAxisID:'y', tension:0.3, pointRadius:3 },
-          { label:'Massa Muscular (kg)', data:bm.map(b=>b.muscle), borderColor:'#10b981', backgroundColor:'#10b981', yAxisID:'y1', tension:0.3, pointRadius:3 },
-        ]
-      },
-      options:{
-        responsive:true,
-        plugins:{ legend:{ labels:{ boxWidth:10, font:{size:10} } } },
-        scales:{
-          y: { type:'linear', position:'left', grid:{ color:gridColor }, title:{ display:true, text:'Peso (kg)', font:{size:10} } },
-          y1: { type:'linear', position:'right', grid:{ display:false }, title:{ display:true, text:'Músculo (kg)', font:{size:10} } },
-          x: { grid:{ display:false } }
-        }
-      }
-    });
-  }
-
-  const nutriCanvas = document.getElementById('chartNutrition');
-  if (nutriCanvas) {
-    const map = dailyNutritionMap();
-    const dates = Object.keys(map).sort().slice(-14);
-    const labels = dates.map(d => formatDatePT(d));
-    charts.nutrition = new Chart(nutriCanvas, {
-      data:{
-        labels,
-        datasets:[
-          { type:'bar', label:'Calorias', data:dates.map(d=>map[d].calories), backgroundColor:'rgba(250,204,21,0.6)', yAxisID:'y', borderRadius:4 },
-          { type:'line', label:'Proteína (g)', data:dates.map(d=>map[d].protein), borderColor:'#10b981', backgroundColor:'#10b981', yAxisID:'y1', tension:0.3, pointRadius:3 },
-        ]
-      },
-      options:{
-        responsive:true,
-        plugins:{ legend:{ labels:{ boxWidth:10, font:{size:10} } } },
-        scales:{
-          y:{ type:'linear', position:'left', grid:{ color:gridColor }, title:{ display:true, text:'kcal', font:{size:10} } },
-          y1:{ type:'linear', position:'right', grid:{ display:false }, title:{ display:true, text:'g proteína', font:{size:10} } },
-          x:{ grid:{ display:false } }
-        }
-      }
-    });
-  }
-}
-
-/* ============================= COACH LOGS ============================= */
-async function saveCoachInsight(){
-  const el = document.getElementById('coachTextarea');
-  const text = el.value.trim();
-  if (!text) return;
-  await addCoachLog(text);
-}
-
-function renderCoach(){
-  return `
-    <div class="space-y-4 fade-in">
-      <div class="card rounded-2xl p-4">
-        <div class="flex items-center gap-2 mb-3">
-          <i data-lucide="brain-circuit" class="w-4 h-4 text-yellow-400"></i>
-          <h2 class="text-sm font-semibold text-white">Insight do Coach AI</h2>
-        </div>
-        <textarea id="coachTextarea" rows="5" placeholder="Cola aqui a análise do teu Coach AI de hoje..."
-          class="w-full bg-neutral-900 border border-neutral-800 rounded-xl px-3 py-2 text-sm text-white placeholder-slate-600 outline-none focus:border-yellow-400/60 resize-none"></textarea>
-        <button onclick="saveCoachInsight()" class="mt-2 w-full bg-yellow-400 text-neutral-950 font-bold text-sm rounded-xl py-2.5 flex items-center justify-center gap-1.5 active:scale-[0.98] transition">
-          <i data-lucide="save" class="w-4 h-4"></i> Guardar Insight
+        <button onclick="analyzeMeal()" ${(!photoBase64 || analyzing) ? 'disabled' : ''}
+          class="w-full bg-yellow-400 text-neutral-950 font-bold text-sm rounded-xl py-2.5 flex items-center justify-center gap-1.5 active:scale-[0.98] transition disabled:opacity-40 ${analyzing?'analyzing':''}">
+          ${analyzing
+            ? '<i data-lucide="loader-2" class="w-4 h-4 animate-spin"></i> A analisar com IA...'
+            : '<i data-lucide="sparkles" class="w-4 h-4"></i> Analisar Refeição'}
         </button>
       </div>
 
       <div class="space-y-3">
-        ${state.coachLogs.length === 0 ? `<p class="text-xs text-slate-500 px-1">Ainda sem insights guardados.</p>` : state.coachLogs.map(log => `
-          <div class="card rounded-2xl p-4">
-            <div class="flex items-center justify-between mb-2">
-              <span class="text-[11px] font-bold text-yellow-400 flex items-center gap-1.5">
-                <i data-lucide="calendar" class="w-3.5 h-3.5"></i> ${formatDatePT(log.date)}
-              </span>
-              <button onclick="deleteCoachLog('${log.id}')" class="text-slate-600 hover:text-red-400">
-                <i data-lucide="trash-2" class="w-4 h-4"></i>
-              </button>
-            </div>
-            <p class="text-xs text-slate-300 leading-relaxed whitespace-pre-wrap">${log.text.replace(/</g,'&lt;')}</p>
+        <h2 class="text-xs font-semibold text-slate-500 px-1 uppercase tracking-wide">Refeições recentes</h2>
+        ${recent.length === 0 ? `<p class="text-xs text-slate-500 px-1">Ainda sem refeições registadas.</p>` : recent.map(renderMealCard).join('')}
+      </div>
+    </div>
+  `;
+}
+
+function renderMealCard(meal){
+  const n = mealNutrients(meal);
+  const expanded = expandedMealId === meal.id;
+  const photoUrl = meal.photo_path ? signedUrlCache[meal.photo_path] : null;
+
+  return `
+    <div class="card rounded-2xl overflow-hidden">
+      <button onclick="toggleMealExpand('${meal.id}')" class="w-full flex items-center justify-between p-4 text-left">
+        <div class="flex items-center gap-3 min-w-0">
+          <div class="w-9 h-9 rounded-xl bg-yellow-400/10 border border-yellow-400/30 flex items-center justify-center shrink-0">
+            <i data-lucide="${mealTypeIcon(meal.meal_type)}" class="w-4 h-4 text-yellow-400"></i>
           </div>
-        `).join('')}
+          <div class="min-w-0">
+            <p class="text-xs font-semibold text-white">${mealTypeLabel(meal.meal_type)}</p>
+            <p class="text-[10px] text-slate-500">${formatDatePT(meal.date)} · ${(meal.meal_items||[]).length} item(s)</p>
+          </div>
+        </div>
+        <div class="flex items-center gap-2 shrink-0">
+          <span class="text-xs font-bold text-yellow-400">${n.calories.toFixed(0)} kcal</span>
+          <i data-lucide="${expanded?'chevron-up':'chevron-down'}" class="w-4 h-4 text-slate-500"></i>
+        </div>
+      </button>
+
+      ${expanded ? `
+      <div class="px-4 pb-4 space-y-3 border-t border-neutral-800 pt-3">
+        ${meal.photo_path ? (photoUrl
+          ? `<img src="${photoUrl}" class="w-full rounded-xl border border-neutral-800" alt="Foto" />`
+          : `<div class="w-full h-32 rounded-xl border border-neutral-800 bg-neutral-900 flex items-center justify-center text-slate-600 text-xs gap-2"><i data-lucide="loader-2" class="w-4 h-4 animate-spin"></i> a carregar foto...</div>`) : ''}
+
+        <div class="grid grid-cols-4 gap-1.5 text-center">
+          ${MACROS.map(m => `
+            <div class="bg-neutral-900/60 rounded-xl py-2">
+              <p class="text-[9px] text-slate-500">${m.label}</p>
+              <p class="text-xs font-bold text-white">${n[m.key].toFixed(0)}<span class="text-[9px] font-normal text-slate-500">${m.unit==='kcal'?'':m.unit}</span></p>
+            </div>
+          `).join('')}
+        </div>
+
+        <div class="space-y-2">
+          ${(meal.meal_items||[]).map(item => {
+            const ni = itemNutrients(item);
+            return `
+            <div class="bg-neutral-900/60 border border-neutral-800 rounded-xl p-3">
+              <div class="flex items-center justify-between mb-2">
+                <p class="text-xs font-semibold text-white truncate mr-2">${esc(item.name)}</p>
+                <button onclick="deleteMealItem('${item.id}')" class="text-slate-600 hover:text-red-400 shrink-0">
+                  <i data-lucide="trash-2" class="w-3.5 h-3.5"></i>
+                </button>
+              </div>
+              <div class="flex items-center gap-2 mb-1.5">
+                <input type="number" min="0" step="5" value="${Math.round(item.quantity_grams)}"
+                  onchange="updateItemQuantity('${item.id}', this.value)"
+                  class="w-20 bg-neutral-950 border border-neutral-700 rounded-lg px-2 py-1 text-xs text-white outline-none focus:border-yellow-400/60" />
+                <span class="text-[10px] text-slate-500">gramas</span>
+              </div>
+              <p class="text-[10px] text-slate-500">
+                ${ni.calories.toFixed(0)} kcal · P ${ni.protein.toFixed(1)}g · H ${ni.carbs.toFixed(1)}g · G ${ni.fat.toFixed(1)}g
+              </p>
+            </div>
+          `;}).join('')}
+        </div>
+
+        <button onclick="deleteMeal('${meal.id}')" class="w-full border border-red-500/40 text-red-400 text-xs font-semibold rounded-xl py-2 flex items-center justify-center gap-1.5">
+          <i data-lucide="trash-2" class="w-3.5 h-3.5"></i> Eliminar refeição
+        </button>
+      </div>` : ''}
+    </div>
+  `;
+}
+
+/* ============================= PERFIL ============================= */
+function renderPerfil(){
+  const p = state.profile || {};
+  return `
+    <div class="space-y-4 fade-in">
+      <div class="card rounded-2xl p-4">
+        <div class="flex items-center gap-2 mb-3">
+          <i data-lucide="user" class="w-4 h-4 text-yellow-400"></i>
+          <h2 class="text-sm font-semibold text-white">O meu Perfil</h2>
+        </div>
+        <div class="space-y-2">
+          <div>
+            <label class="text-[11px] text-slate-500">Nome</label>
+            <input id="pfName" type="text" value="${esc(p.display_name||'')}"
+              class="w-full bg-neutral-900 border border-neutral-800 rounded-xl px-3 py-2 text-sm text-white outline-none focus:border-yellow-400/60" />
+          </div>
+          <div class="grid grid-cols-2 gap-2">
+            <div>
+              <label class="text-[11px] text-slate-500">Meta calorias (kcal/dia)</label>
+              <input id="pfCal" type="number" min="1" value="${p.calorie_goal||2000}"
+                class="w-full bg-neutral-900 border border-neutral-800 rounded-xl px-3 py-2 text-sm text-white outline-none focus:border-yellow-400/60" />
+            </div>
+            <div>
+              <label class="text-[11px] text-slate-500">Meta proteína (g/dia)</label>
+              <input id="pfPro" type="number" min="1" value="${p.protein_goal||150}"
+                class="w-full bg-neutral-900 border border-neutral-800 rounded-xl px-3 py-2 text-sm text-white outline-none focus:border-yellow-400/60" />
+            </div>
+            <div>
+              <label class="text-[11px] text-slate-500">Meta hidratos (g/dia)</label>
+              <input id="pfCarb" type="number" min="1" value="${p.carbs_goal||200}"
+                class="w-full bg-neutral-900 border border-neutral-800 rounded-xl px-3 py-2 text-sm text-white outline-none focus:border-yellow-400/60" />
+            </div>
+            <div>
+              <label class="text-[11px] text-slate-500">Meta gordura (g/dia)</label>
+              <input id="pfFat" type="number" min="1" value="${p.fat_goal||70}"
+                class="w-full bg-neutral-900 border border-neutral-800 rounded-xl px-3 py-2 text-sm text-white outline-none focus:border-yellow-400/60" />
+            </div>
+          </div>
+          <p id="pfSaved" class="hidden text-[11px] text-emerald-400 flex items-center gap-1"><i data-lucide="check" class="w-3.5 h-3.5"></i> Guardado.</p>
+          <button onclick="saveProfileFromForm()" class="w-full bg-emerald-500 text-neutral-950 font-bold text-sm rounded-xl py-2.5 flex items-center justify-center gap-1.5 active:scale-[0.98] transition">
+            <i data-lucide="save" class="w-4 h-4"></i> Guardar Metas
+          </button>
+        </div>
+      </div>
+
+      <div class="card rounded-2xl p-4">
+        <p class="text-[11px] text-slate-500 mb-3">Sessão iniciada como <b class="text-slate-300">${esc(currentUser.email||'')}</b></p>
+        <button onclick="signOut()" class="w-full border border-red-500/40 text-red-400 text-xs font-semibold rounded-xl py-2.5 flex items-center justify-center gap-1.5">
+          <i data-lucide="log-out" class="w-3.5 h-3.5"></i> Terminar sessão
+        </button>
       </div>
     </div>
   `;
@@ -926,8 +788,6 @@ function renderCoach(){
 /* ============================= INIT ============================= */
 document.addEventListener('DOMContentLoaded', () => {
   render();
-  if (!isConfigured) return;
-
   sb.auth.onAuthStateChange(async (event, session) => {
     const newUser = session ? session.user : null;
     const wasLoggedIn = !!currentUser;
@@ -936,8 +796,9 @@ document.addEventListener('DOMContentLoaded', () => {
     if (newUser && !wasLoggedIn) {
       await loadAllData();
     } else if (!newUser) {
-      state = { pain:[], meals:[], bodyMetrics:[], checklist:{}, coachLogs:[] };
+      state = { profile:null, meals:[] };
       activeTab = 'dashboard';
+      signedUrlCache = {};
       render();
     }
   });

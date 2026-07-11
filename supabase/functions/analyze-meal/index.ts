@@ -1,6 +1,6 @@
 // IronHealth · analyze-meal Edge Function
 // Recebe uma foto de refeição (base64) + data + tipo de refeição,
-// analisa com Gemini 2.5 Flash e grava meals + meal_items na BD.
+// analisa com Gemini (flash mais recente) e grava meals + meal_items na BD.
 // A chave Gemini vive apenas aqui (secret GEMINI_API_KEY), nunca no cliente.
 
 import { createClient } from "jsr:@supabase/supabase-js@2";
@@ -13,7 +13,9 @@ const corsHeaders = {
 
 const MEAL_TYPES = ["pequeno-almoco", "almoco", "lanche", "jantar", "ceia"];
 
-const GEMINI_MODEL = "gemini-2.5-flash";
+// Alias que segue sempre o modelo flash estável mais recente — evita 404s
+// quando a Google descontinua modelos para contas novas.
+const GEMINI_MODEL = "gemini-flash-latest";
 
 const RESPONSE_SCHEMA = {
   type: "OBJECT",

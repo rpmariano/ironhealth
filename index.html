@@ -115,6 +115,7 @@ let syncError = null;
 let activeTab = 'dashboard';
 let activeRange = 'hoje'; // hoje | semana | mes
 let expandedMealId = null;
+let showAddItemForm = false;
 let photos = [];              // [{ dataUrl, base64 }] fotos comprimidas prontas a enviar
 const MAX_PHOTOS = 6;
 let selectedMealType = 'almoco';
@@ -135,6 +136,7 @@ function formatDatePT(iso){
   return `${String(d).padStart(2,'0')} ${PT_MONTHS[m-1]} ${y}`;
 }
 function esc(s){ return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
+function uid(){ return 'tmp-' + Date.now().toString(36) + Math.random().toString(36).slice(2,7); }
 function mealTypeLabel(key){ const t = MEAL_TYPES.find(t=>t.key===key); return t ? t.label : key; }
 function mealTypeIcon(key){ const t = MEAL_TYPES.find(t=>t.key===key); return t ? t.icon : 'utensils'; }
 
@@ -371,6 +373,64 @@ async function deleteMeal(mealId){
   } catch(e) { flashSyncError(e); }
 }
 
+function toggleAddItemForm(){
+  showAddItemForm = !showAddItemForm;
+  render();
+}
+
+async function submitNewItem(mealId){
+  const nameEl = document.getElementById('newItemName');
+  const gramsEl = document.getElementById('newItemGrams');
+  const calEl = document.getElementById('newItemCalories');
+  const proEl = document.getElementById('newItemProtein');
+  const carbEl = document.getElementById('newItemCarbs');
+  const fatEl = document.getElementById('newItemFat');
+  const errEl = document.getElementById('newItemError');
+
+  const name = nameEl.value.trim();
+  const grams = Number(gramsEl.value);
+  const calories = Number(calEl.value);
+  const protein = Number(proEl.value) || 0;
+  const carbs = Number(carbEl.value) || 0;
+  const fat = Number(fatEl.value) || 0;
+
+  if (!name || !(grams > 0) || isNaN(calories) || calories < 0) {
+    errEl.textContent = 'Preenche nome, gramas e calorias com valores válidos.';
+    errEl.classList.remove('hidden');
+    return;
+  }
+
+  const found = findMealById(mealId);
+  if (!found) return;
+
+  const factor = 100 / grams;
+  const localItem = {
+    id: uid(), name, quantity_grams: grams,
+    calories_per_100g: calories * factor,
+    protein_per_100g: protein * factor,
+    carbs_per_100g: carbs * factor,
+    fat_per_100g: fat * factor,
+    fiber_per_100g: 0, sugar_per_100g: 0, sodium_per_100g: 0,
+    iron_mg_per_100g: 0, calcium_mg_per_100g: 0, vitamin_c_mg_per_100g: 0, potassium_mg_per_100g: 0,
+  };
+  found.meal.meal_items = [...(found.meal.meal_items || []), localItem];
+  showAddItemForm = false;
+  render();
+  try {
+    const { data, error } = await sb.from('meal_items').insert({
+      meal_id: mealId, user_id: currentUser.id, name: localItem.name, quantity_grams: grams,
+      calories_per_100g: localItem.calories_per_100g, protein_per_100g: localItem.protein_per_100g,
+      carbs_per_100g: localItem.carbs_per_100g, fat_per_100g: localItem.fat_per_100g,
+    }).select().single();
+    if (error) throw error;
+    localItem.id = data.id;
+  } catch(e) {
+    found.meal.meal_items = found.meal.meal_items.filter(i => i !== localItem);
+    flashSyncError(e);
+  }
+  render();
+}
+
 async function saveProfileFromForm(){
   const get = id => Number(document.getElementById(id).value);
   const name = document.getElementById('pfName').value.trim();
@@ -480,11 +540,12 @@ async function analyzeMeal(){
 }
 
 async function toggleMealExpand(mealId){
+  if (expandedMealId !== mealId) showAddItemForm = false;
   expandedMealId = expandedMealId === mealId ? null : mealId;
   render();
   if (expandedMealId) {
-    const meal = state.meals.find(m => m.id === mealId);
-    const paths = (meal && meal.photo_paths || []).filter(p => !signedUrlCache[p]);
+    const found = findMealById(mealId);
+    const paths = (found && found.meal.photo_paths || []).filter(p => !signedUrlCache[p]);
     if (paths.length) {
       try {
         const { data, error } = await sb.storage.from('meal-photos').createSignedUrls(paths, 3600);
@@ -873,6 +934,44 @@ function renderMealCard(meal){
             </div>
           `;}).join('')}
         </div>
+
+        ${expandedMealId === meal.id && showAddItemForm ? `
+          <div class="bg-neutral-900/60 border border-yellow-400/30 rounded-xl p-3 space-y-2">
+            <p class="text-xs font-semibold text-yellow-400 flex items-center gap-1.5">
+              <i data-lucide="plus-circle" class="w-3.5 h-3.5"></i> Novo Alimento
+            </p>
+            <input id="newItemName" type="text" placeholder="Nome do alimento"
+              class="w-full bg-neutral-950 border border-neutral-700 rounded-lg px-2 py-1.5 text-xs text-white placeholder-slate-600 outline-none focus:border-yellow-400/60" />
+            <div class="grid grid-cols-2 gap-2">
+              <input id="newItemGrams" type="number" min="0" step="5" placeholder="Gramas"
+                class="w-full bg-neutral-950 border border-neutral-700 rounded-lg px-2 py-1.5 text-xs text-white placeholder-slate-600 outline-none focus:border-yellow-400/60" />
+              <input id="newItemCalories" type="number" min="0" step="1" placeholder="Calorias (kcal)"
+                class="w-full bg-neutral-950 border border-neutral-700 rounded-lg px-2 py-1.5 text-xs text-white placeholder-slate-600 outline-none focus:border-yellow-400/60" />
+            </div>
+            <div class="grid grid-cols-3 gap-2">
+              <input id="newItemProtein" type="number" min="0" step="0.5" placeholder="Prot. (g)"
+                class="w-full bg-neutral-950 border border-neutral-700 rounded-lg px-2 py-1.5 text-xs text-white placeholder-slate-600 outline-none focus:border-yellow-400/60" />
+              <input id="newItemCarbs" type="number" min="0" step="0.5" placeholder="Hidr. (g)"
+                class="w-full bg-neutral-950 border border-neutral-700 rounded-lg px-2 py-1.5 text-xs text-white placeholder-slate-600 outline-none focus:border-yellow-400/60" />
+              <input id="newItemFat" type="number" min="0" step="0.5" placeholder="Gord. (g)"
+                class="w-full bg-neutral-950 border border-neutral-700 rounded-lg px-2 py-1.5 text-xs text-white placeholder-slate-600 outline-none focus:border-yellow-400/60" />
+            </div>
+            <p id="newItemError" class="hidden text-[11px] text-red-400"></p>
+            <div class="grid grid-cols-2 gap-2 pt-1">
+              <button onclick="toggleAddItemForm()" type="button" class="border border-neutral-700 text-slate-300 text-xs font-semibold rounded-lg py-2">
+                Cancelar
+              </button>
+              <button onclick="submitNewItem('${meal.id}')" type="button" class="bg-yellow-400 text-neutral-950 text-xs font-bold rounded-lg py-2 flex items-center justify-center gap-1.5">
+                <i data-lucide="check" class="w-3.5 h-3.5"></i> Guardar Alimento
+              </button>
+            </div>
+          </div>
+        ` : `
+          <button onclick="toggleAddItemForm()" type="button"
+            class="w-full border-2 border-dashed border-neutral-700 hover:border-yellow-400/50 text-slate-400 hover:text-yellow-400 text-xs font-semibold rounded-xl py-2.5 flex items-center justify-center gap-1.5 transition">
+            <i data-lucide="plus" class="w-4 h-4"></i> Adicionar Alimento
+          </button>
+        `}
 
         <button onclick="deleteMeal('${meal.id}')" class="w-full border border-red-500/40 text-red-400 text-xs font-semibold rounded-xl py-2 flex items-center justify-center gap-1.5">
           <i data-lucide="trash-2" class="w-3.5 h-3.5"></i> Eliminar refeição

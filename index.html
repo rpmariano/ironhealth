@@ -29,23 +29,33 @@
   .analyzing { animation: pulse-soft 1.2s ease-in-out infinite; }
 
   input[type=number]::-webkit-inner-spin-button { opacity:1; }
+
+  .no-scrollbar::-webkit-scrollbar { display:none; }
+  .no-scrollbar { scrollbar-width:none; -ms-overflow-style:none; }
+
+  .vertical-btn .vertical-icon { background:#18181b; border:1px solid #27272a; color:#71717a; }
+  .vertical-btn.active .vertical-icon { background:#facc15; border-color:#facc15; color:#09090b; }
+  .vertical-btn.active .vertical-label { color:#facc15; }
 </style>
 </head>
 <body class="bg-neutral-950 text-slate-200 font-sans antialiased">
 <div id="app" class="max-w-md mx-auto min-h-screen flex flex-col relative">
 
-  <header class="sticky top-0 z-20 bg-neutral-950/90 backdrop-blur border-b border-neutral-800 px-4 pt-4 pb-3 flex items-center justify-between">
-    <div class="flex items-center gap-2">
-      <div class="w-9 h-9 rounded-xl bg-yellow-400/10 border border-yellow-400/40 flex items-center justify-center">
-        <i data-lucide="zap" class="w-5 h-5 text-yellow-400"></i>
+  <div class="sticky top-0 z-20 bg-neutral-950/90 backdrop-blur border-b border-neutral-800">
+    <header class="px-4 pt-4 pb-3 flex items-center justify-between">
+      <div class="flex items-center gap-2">
+        <div class="w-9 h-9 rounded-xl bg-yellow-400/10 border border-yellow-400/40 flex items-center justify-center">
+          <i data-lucide="zap" class="w-5 h-5 text-yellow-400"></i>
+        </div>
+        <div>
+          <h1 class="text-base font-bold tracking-tight text-white leading-none">IronHealth</h1>
+          <p id="header-date" class="text-[11px] text-slate-500 leading-none mt-1"></p>
+        </div>
       </div>
-      <div>
-        <h1 class="text-base font-bold tracking-tight text-white leading-none">IronHealth</h1>
-        <p id="header-date" class="text-[11px] text-slate-500 leading-none mt-1"></p>
-      </div>
-    </div>
-    <div id="headerActions" class="flex items-center gap-2"></div>
-  </header>
+      <div id="headerActions" class="flex items-center gap-2"></div>
+    </header>
+    <div id="verticalStrip" class="hidden px-4 pb-2 flex items-start gap-3 overflow-x-auto no-scrollbar"></div>
+  </div>
 
   <main id="tab-content" class="flex-1 px-4 pt-4 pb-28 overflow-y-auto"></main>
 
@@ -99,6 +109,19 @@ const MICROS = [
   { key:'potassium_mg', label:'Potássio', unit:'mg' },
 ];
 
+// As "verticais" do IronHealth Coach — Nutrição está implementada; as restantes
+// são placeholders "Em breve" até serem desenhadas.
+const VERTICALS = [
+  { key:'home', label:'Início', icon:'layout-grid' },
+  { key:'nutricao', label:'Nutrição', icon:'utensils' },
+  { key:'ginasio', label:'Ginásio', icon:'dumbbell', from:'#1e3a8a', to:'#6366f1',
+    desc:'Regista os teus treinos de ginásio e acompanha a evolução de cargas, séries e repetições ao longo do tempo.' },
+  { key:'corrida', label:'Corrida', icon:'footprints', from:'#9a3412', to:'#f97316',
+    desc:'Regista as tuas corridas — distância, ritmo, tempo — e acompanha a tua evolução como corredor.' },
+  { key:'coach', label:'Coach', icon:'bot', from:'#155e75', to:'#06b6d4',
+    desc:'O teu treinador pessoal com IA vai analisar nutrição, treino e corrida para te dar sugestões — com memória do teu histórico e a estratégia que definires.' },
+];
+
 /* ============================= ESTADO ============================= */
 let state = { profile:null, meals:[] }; // meals: [{...meal, meal_items:[...]}]
 let currentUser = null;
@@ -108,6 +131,7 @@ let authLoading = false;
 let dataLoading = false;
 let syncError = null;
 
+let activeVertical = 'home'; // home | nutricao | ginasio | corrida | coach
 let activeTab = 'dashboard';
 let activeRange = 'hoje'; // hoje | semana | mes
 let registarDate = todayISO(); // data pré-preenchida ao entrar em Registar a partir do Calendário
@@ -674,6 +698,16 @@ function abandonManualMealSession(){
   showAddItemForm = false;
 }
 
+// Troca de vertical (Início / Nutrição / Ginásio / Corrida / Coach).
+function switchVertical(vertical){
+  activeVertical = vertical;
+  analyzeError = null;
+  analyzeSuccess = null;
+  abandonManualMealSession();
+  if (vertical === 'nutricao' && activeTab === 'calendario') ensureCalendarMonthLoaded(calendarViewMonth);
+  render();
+}
+
 function switchTab(tab){
   activeTab = tab;
   analyzeError = null;
@@ -683,9 +717,10 @@ function switchTab(tab){
   render();
 }
 
-// Entra em Registar a partir do Calendário, com a data do dia selecionado já preenchida.
+// Entra em Registar (vertical Nutrição) com a data do dia selecionado já preenchida.
 function goToRegistarForDate(dateIso){
   registarDate = dateIso;
+  activeVertical = 'nutricao';
   activeTab = 'registar';
   analyzeError = null;
   analyzeSuccess = null;
@@ -693,10 +728,11 @@ function goToRegistarForDate(dateIso){
   render();
 }
 
-// Volta ao Calendário já no dia da refeição registada.
+// Volta ao Calendário (vertical Nutrição) já no dia da refeição registada.
 function viewInCalendar(dateIso){
   calendarSelectedDate = dateIso;
   calendarViewMonth = dateIso.slice(0,7);
+  activeVertical = 'nutricao';
   activeTab = 'calendario';
   analyzeSuccess = null;
   abandonManualMealSession();
@@ -704,26 +740,42 @@ function viewInCalendar(dateIso){
   render();
 }
 
+function renderVerticalStrip(){
+  return VERTICALS.map(v => `
+    <button onclick="switchVertical('${v.key}')" class="vertical-btn ${activeVertical===v.key?'active':''} flex flex-col items-center gap-1 shrink-0 w-14">
+      <span class="vertical-icon w-11 h-11 rounded-2xl flex items-center justify-center transition">
+        <i data-lucide="${v.icon}" class="w-5 h-5"></i>
+      </span>
+      <span class="vertical-label text-[10px] font-medium text-slate-500 transition">${v.label}</span>
+    </button>
+  `).join('');
+}
+
 function render(){
   const nav = document.getElementById('bottomNav');
   const headerActions = document.getElementById('headerActions');
+  const verticalStrip = document.getElementById('verticalStrip');
   const main = document.getElementById('tab-content');
   document.getElementById('header-date').textContent = formatDatePT(todayISO());
 
   if (!currentUser) {
     nav.classList.add('hidden');
+    verticalStrip.classList.add('hidden');
     headerActions.innerHTML = '';
     main.innerHTML = renderAuth();
     if (window.lucide) lucide.createIcons();
     return;
   }
 
-  nav.classList.remove('hidden');
+  verticalStrip.classList.remove('hidden');
+  verticalStrip.innerHTML = renderVerticalStrip();
+
+  const showRegistarShortcut = !(activeVertical === 'nutricao' && activeTab === 'registar');
   headerActions.innerHTML = `
     ${syncError
       ? `<span class="text-[11px] text-red-400 flex items-center gap-1 bg-red-400/10 border border-red-400/30 px-2 py-1 rounded-full"><i data-lucide="cloud-off" class="w-3.5 h-3.5"></i></span>`
       : ''}
-    ${activeTab !== 'registar' ? `
+    ${showRegistarShortcut ? `
       <button onclick="goToRegistarForDate(todayISO())"
         class="flex items-center gap-1 bg-yellow-400 text-neutral-950 text-xs font-bold pl-2.5 pr-3 py-1.5 rounded-full active:scale-95 transition">
         <i data-lucide="camera" class="w-3.5 h-3.5"></i> Registar
@@ -732,11 +784,21 @@ function render(){
   `;
 
   if (dataLoading) {
+    nav.classList.add('hidden');
     main.innerHTML = `<div class="flex items-center justify-center h-[60vh] text-slate-500 text-xs gap-2"><i data-lucide="loader-2" class="w-4 h-4 animate-spin"></i> A carregar dados...</div>`;
     if (window.lucide) lucide.createIcons();
     return;
   }
 
+  if (activeVertical !== 'nutricao') {
+    nav.classList.add('hidden');
+    if (activeVertical === 'home') main.innerHTML = renderHome();
+    else main.innerHTML = renderVerticalPlaceholder(VERTICALS.find(v => v.key === activeVertical));
+    if (window.lucide) lucide.createIcons();
+    return;
+  }
+
+  nav.classList.remove('hidden');
   const navHighlight = activeTab === 'registar' ? 'calendario' : activeTab; // Registar é acedido a partir do Calendário
   document.querySelectorAll('.tab-btn').forEach(btn => {
     btn.classList.toggle('active', btn.dataset.tab === navHighlight);
@@ -748,6 +810,82 @@ function render(){
 
   if (window.lucide) lucide.createIcons();
   if (activeTab === 'dashboard') requestAnimationFrame(renderDashChart);
+}
+
+/* ============================= INÍCIO (visão geral das verticais) ============================= */
+function renderHome(){
+  const totals = rangeTotals('hoje');
+  const profile = state.profile || {};
+  const calGoal = Number(profile.calorie_goal) || 0;
+  const remaining = calGoal - totals.calories;
+  const mealsToday = state.meals.filter(m => m.date === todayISO()).length;
+
+  return `
+    <div class="space-y-4 fade-in">
+      <div class="rounded-3xl p-5 relative overflow-hidden" style="background:linear-gradient(135deg, #b45309, #facc15);">
+        <div class="relative z-10">
+          <p class="text-xs font-semibold text-neutral-900/70 uppercase tracking-wide mb-1">Hoje</p>
+          <p class="text-3xl font-bold text-neutral-950 leading-none">${totals.calories.toFixed(0)}<span class="text-base font-semibold"> kcal</span></p>
+          <p class="text-xs text-neutral-900/80 mt-2">${calGoal > 0
+            ? (remaining >= 0 ? `Restam ${remaining.toFixed(0)} kcal de ${calGoal.toFixed(0)}` : `${Math.abs(remaining).toFixed(0)} kcal acima da meta`)
+            : 'Define as tuas metas no Perfil (dentro de Nutrição)'}</p>
+        </div>
+        <i data-lucide="flame" class="w-24 h-24 absolute -right-3 -bottom-3 text-neutral-950/10"></i>
+      </div>
+
+      <div class="grid grid-cols-2 gap-3">
+        <button onclick="switchVertical('nutricao')" class="rounded-2xl p-4 text-left relative overflow-hidden min-h-[132px] flex flex-col justify-between" style="background:linear-gradient(135deg, #065f46, #10b981);">
+          <i data-lucide="utensils" class="w-6 h-6 text-white/90"></i>
+          <div>
+            <p class="text-xs font-semibold text-white">Nutrição</p>
+            <p class="text-[11px] text-white/80 mt-0.5">${mealsToday} refeição(ões) hoje</p>
+          </div>
+        </button>
+        <button onclick="switchVertical('ginasio')" class="rounded-2xl p-4 text-left relative overflow-hidden min-h-[132px] flex flex-col justify-between" style="background:linear-gradient(135deg, #1e3a8a, #6366f1);">
+          <i data-lucide="dumbbell" class="w-6 h-6 text-white/90"></i>
+          <div>
+            <p class="text-xs font-semibold text-white">Ginásio</p>
+            <p class="text-[11px] text-white/80 mt-0.5">Em breve</p>
+          </div>
+        </button>
+        <button onclick="switchVertical('corrida')" class="rounded-2xl p-4 text-left relative overflow-hidden min-h-[132px] flex flex-col justify-between" style="background:linear-gradient(135deg, #9a3412, #f97316);">
+          <i data-lucide="footprints" class="w-6 h-6 text-white/90"></i>
+          <div>
+            <p class="text-xs font-semibold text-white">Corrida</p>
+            <p class="text-[11px] text-white/80 mt-0.5">Em breve</p>
+          </div>
+        </button>
+        <button onclick="switchVertical('coach')" class="rounded-2xl p-4 text-left relative overflow-hidden min-h-[132px] flex flex-col justify-between" style="background:linear-gradient(135deg, #155e75, #06b6d4);">
+          <i data-lucide="bot" class="w-6 h-6 text-white/90"></i>
+          <div>
+            <p class="text-xs font-semibold text-white">Coach</p>
+            <p class="text-[11px] text-white/80 mt-0.5">Em breve</p>
+          </div>
+        </button>
+      </div>
+
+      <button onclick="goToRegistarForDate(todayISO())"
+        class="w-full bg-yellow-400 text-neutral-950 font-bold text-sm rounded-2xl py-3 flex items-center justify-center gap-2 active:scale-[0.98] transition">
+        <i data-lucide="camera" class="w-4 h-4"></i> Registar Refeição
+      </button>
+    </div>
+  `;
+}
+
+function renderVerticalPlaceholder(v){
+  return `
+    <div class="min-h-[65vh] flex flex-col items-center justify-center text-center px-6 fade-in">
+      <div class="w-20 h-20 rounded-3xl flex items-center justify-center mb-4" style="background:linear-gradient(135deg, ${v.from}, ${v.to});">
+        <i data-lucide="${v.icon}" class="w-9 h-9 text-white"></i>
+      </div>
+      <h2 class="text-base font-bold text-white mb-1">${v.label}</h2>
+      <p class="text-xs text-slate-500 max-w-xs leading-relaxed">${v.desc}</p>
+      <span class="mt-4 text-[11px] font-semibold text-yellow-400 bg-yellow-400/10 border border-yellow-400/30 px-3 py-1 rounded-full">Em breve</span>
+      <button onclick="switchVertical('home')" class="mt-6 text-[11px] text-slate-500 flex items-center gap-1">
+        <i data-lucide="arrow-left" class="w-3.5 h-3.5"></i> Voltar ao Início
+      </button>
+    </div>
+  `;
 }
 
 /* ============================= DASHBOARD ============================= */
@@ -1247,6 +1385,7 @@ document.addEventListener('DOMContentLoaded', () => {
       await loadAllData();
     } else if (!newUser) {
       state = { profile:null, meals:[] };
+      activeVertical = 'home';
       activeTab = 'dashboard';
       signedUrlCache = {};
       render();

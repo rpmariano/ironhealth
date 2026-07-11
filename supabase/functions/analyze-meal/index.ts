@@ -1,9 +1,12 @@
 // IronHealth · analyze-meal Edge Function
-// Recebe uma foto de refeição (base64) + data + tipo de refeição,
-// analisa com Gemini (flash mais recente) e grava meals + meal_items na BD.
+// Recebe 1+ fotos de uma refeição (base64) + data + tipo de refeição,
+// analisa todas em conjunto com Gemini (flash mais recente) e grava
+// meals + meal_items na BD.
 // A chave Gemini vive apenas aqui (secret GEMINI_API_KEY), nunca no cliente.
 
 import { createClient } from "jsr:@supabase/supabase-js@2";
+
+const MAX_PHOTOS = 6;
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -54,8 +57,11 @@ const RESPONSE_SCHEMA = {
 };
 
 const PROMPT =
-  "Identifica cada alimento distinto nesta fotografia de uma refeição. " +
-  "Para cada item, estima a porção visível em gramas e o seu conteúdo nutricional " +
+  "As fotografias seguintes mostram todas a MESMA refeição (possivelmente de " +
+  "ângulos diferentes ou vários pratos/componentes). Combina a informação de todas " +
+  "as fotos e identifica cada alimento distinto no conjunto, sem contar o mesmo " +
+  "alimento duas vezes por aparecer em várias fotos. " +
+  "Para cada item, estima a porção total visível em gramas e o seu conteúdo nutricional " +
   "POR 100 GRAMAS (não por porção), usando valores de referência de bases de dados " +
   "nutricionais padrão. O sódio é em mg por 100g. Usa nomes em português de Portugal. " +
   "Responde apenas com JSON estruturado conforme o schema.";
@@ -105,10 +111,22 @@ Deno.serve(async (req) => {
     }
     const userId = userData.user.id;
 
-    const { image_base64, mime_type, date, meal_type } = await req.json();
+    const body = await req.json();
+    const { mime_type, date, meal_type } = body;
 
-    if (!image_base64 || typeof image_base64 !== "string") {
-      return jsonResponse({ error: "Imagem em falta" }, 400);
+    // Aceita `images` (array) ou `image_base64` (formato antigo, 1 foto)
+    let images: string[] = [];
+    if (Array.isArray(body.images)) {
+      images = body.images.filter((s: unknown) => typeof s === "string" && s.length > 0);
+    } else if (typeof body.image_base64 === "string" && body.image_base64) {
+      images = [body.image_base64];
+    }
+
+    if (images.length === 0) {
+      return jsonResponse({ error: "Nenhuma imagem recebida" }, 400);
+    }
+    if (images.length > MAX_PHOTOS) {
+      return jsonResponse({ error: `Máximo de ${MAX_PHOTOS} fotos por refeição` }, 400);
     }
     if (!MEAL_TYPES.includes(meal_type)) {
       return jsonResponse({ error: "Tipo de refeição inválido" }, 400);
@@ -120,30 +138,34 @@ Deno.serve(async (req) => {
         .includes(mime_type)
       ? mime_type
       : "image/jpeg";
-
-    // 1. Upload da foto para o bucket privado, pasta do próprio utilizador
     const ext = mime === "image/png" ? "png" : mime === "image/webp" ? "webp" : "jpg";
-    const photoPath = `${userId}/${crypto.randomUUID()}.${ext}`;
-    const { error: uploadError } = await sb.storage
-      .from("meal-photos")
-      .upload(photoPath, base64ToBytes(image_base64), { contentType: mime });
-    if (uploadError) {
-      return jsonResponse({ error: `Falha no upload da foto: ${uploadError.message}` }, 500);
+
+    // 1. Upload de todas as fotos para o bucket privado, pasta do próprio utilizador
+    const photoPaths: string[] = [];
+    for (const b64 of images) {
+      const path = `${userId}/${crypto.randomUUID()}.${ext}`;
+      const { error: uploadError } = await sb.storage
+        .from("meal-photos")
+        .upload(path, base64ToBytes(b64), { contentType: mime });
+      if (uploadError) {
+        if (photoPaths.length) await sb.storage.from("meal-photos").remove(photoPaths);
+        return jsonResponse({ error: `Falha no upload da foto: ${uploadError.message}` }, 500);
+      }
+      photoPaths.push(path);
     }
 
-    // 2. Análise Gemini
+    // 2. Análise Gemini — todas as fotos numa só chamada (partes múltiplas)
+    const parts: unknown[] = [{ text: PROMPT }];
+    for (const b64 of images) {
+      parts.push({ inline_data: { mime_type: mime, data: b64 } });
+    }
     const geminiRes = await fetch(
       `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent?key=${geminiKey}`,
       {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          contents: [{
-            parts: [
-              { text: PROMPT },
-              { inline_data: { mime_type: mime, data: image_base64 } },
-            ],
-          }],
+          contents: [{ parts }],
           generationConfig: {
             response_mime_type: "application/json",
             response_schema: RESPONSE_SCHEMA,
@@ -155,7 +177,7 @@ Deno.serve(async (req) => {
     if (!geminiRes.ok) {
       const errText = await geminiRes.text();
       console.error("Gemini error:", geminiRes.status, errText);
-      await sb.storage.from("meal-photos").remove([photoPath]);
+      await sb.storage.from("meal-photos").remove(photoPaths);
       return jsonResponse(
         { error: `Análise falhou (Gemini ${geminiRes.status}). Tenta novamente.` },
         502,
@@ -169,7 +191,7 @@ Deno.serve(async (req) => {
       parsed = JSON.parse(rawText);
     } catch {
       console.error("Gemini devolveu JSON inválido:", rawText);
-      await sb.storage.from("meal-photos").remove([photoPath]);
+      await sb.storage.from("meal-photos").remove(photoPaths);
       return jsonResponse({ error: "A análise devolveu um formato inesperado. Tenta novamente." }, 502);
     }
 
@@ -193,9 +215,9 @@ Deno.serve(async (req) => {
       }));
 
     if (items.length === 0) {
-      await sb.storage.from("meal-photos").remove([photoPath]);
+      await sb.storage.from("meal-photos").remove(photoPaths);
       return jsonResponse(
-        { error: "Não foi possível identificar alimentos na foto. Tenta outro ângulo ou mais luz." },
+        { error: "Não foi possível identificar alimentos nas fotos. Tenta outro ângulo ou mais luz." },
         422,
       );
     }
@@ -203,11 +225,11 @@ Deno.serve(async (req) => {
     // 3. Gravar refeição + itens
     const { data: meal, error: mealError } = await sb
       .from("meals")
-      .insert({ user_id: userId, date, meal_type, photo_path: photoPath, status: "ready" })
+      .insert({ user_id: userId, date, meal_type, photo_paths: photoPaths, status: "ready" })
       .select()
       .single();
     if (mealError) {
-      await sb.storage.from("meal-photos").remove([photoPath]);
+      await sb.storage.from("meal-photos").remove(photoPaths);
       return jsonResponse({ error: `Falha a gravar refeição: ${mealError.message}` }, 500);
     }
 
@@ -217,7 +239,7 @@ Deno.serve(async (req) => {
       .select();
     if (itemsError) {
       await sb.from("meals").delete().eq("id", meal.id);
-      await sb.storage.from("meal-photos").remove([photoPath]);
+      await sb.storage.from("meal-photos").remove(photoPaths);
       return jsonResponse({ error: `Falha a gravar itens: ${itemsError.message}` }, 500);
     }
 

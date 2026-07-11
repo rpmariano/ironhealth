@@ -111,6 +111,7 @@ let syncError = null;
 let activeTab = 'dashboard';
 let activeRange = 'hoje'; // hoje | semana | mes
 let registarDate = todayISO(); // data pré-preenchida ao entrar em Registar a partir do Calendário
+let manualMealId = null;      // refeição a ser construída manualmente (sem foto) no Registar
 let expandedMealId = null;
 let showAddItemForm = false;
 let photos = [];              // [{ dataUrl, base64 }] fotos comprimidas prontas a enviar
@@ -363,6 +364,7 @@ async function deleteMeal(mealId){
   const { meal, array } = found;
   array.splice(array.indexOf(meal), 1);
   if (expandedMealId === mealId) expandedMealId = null;
+  if (manualMealId === mealId) manualMealId = null;
   render();
   try {
     if (meal.photo_paths && meal.photo_paths.length) await sb.storage.from('meal-photos').remove(meal.photo_paths);
@@ -539,6 +541,37 @@ async function analyzeMeal(){
   render();
 }
 
+async function startManualMeal(){
+  const date = document.getElementById('mealDate').value || todayISO();
+  try {
+    const { data, error } = await sb.from('meals')
+      .insert({ user_id: currentUser.id, date, meal_type: selectedMealType, photo_paths: [], status: 'ready' })
+      .select().single();
+    if (error) throw error;
+    data.meal_items = [];
+    state.meals.unshift(data);
+    manualMealId = data.id;
+    expandedMealId = data.id;
+    showAddItemForm = true;
+    analyzeSuccess = null;
+  } catch(e) {
+    flashSyncError(e);
+  }
+  render();
+}
+
+function finishManualMeal(){
+  const found = manualMealId ? findMealById(manualMealId) : null;
+  if (found) {
+    const n = mealNutrients(found.meal);
+    analyzeSuccess = { mealType: found.meal.meal_type, date: found.meal.date, calories: n.calories, itemCount: (found.meal.meal_items||[]).length };
+  }
+  manualMealId = null;
+  expandedMealId = null;
+  showAddItemForm = false;
+  render();
+}
+
 async function toggleMealExpand(mealId){
   if (expandedMealId !== mealId) showAddItemForm = false;
   expandedMealId = expandedMealId === mealId ? null : mealId;
@@ -626,10 +659,20 @@ async function signOut(){
 }
 
 /* ============================= RENDER GERAL ============================= */
+// Abandona uma refeição manual em construção ao navegar para longe do Registar
+// (a refeição já está gravada, só a sessão de edição na UI é que se fecha).
+function abandonManualMealSession(){
+  if (!manualMealId) return;
+  manualMealId = null;
+  expandedMealId = null;
+  showAddItemForm = false;
+}
+
 function switchTab(tab){
   activeTab = tab;
   analyzeError = null;
   analyzeSuccess = null;
+  abandonManualMealSession();
   if (tab === 'calendario') ensureCalendarMonthLoaded(calendarViewMonth);
   render();
 }
@@ -640,6 +683,7 @@ function goToRegistarForDate(dateIso){
   activeTab = 'registar';
   analyzeError = null;
   analyzeSuccess = null;
+  abandonManualMealSession();
   render();
 }
 
@@ -649,6 +693,7 @@ function viewInCalendar(dateIso){
   calendarViewMonth = dateIso.slice(0,7);
   activeTab = 'calendario';
   analyzeSuccess = null;
+  abandonManualMealSession();
   ensureCalendarMonthLoaded(calendarViewMonth);
   render();
 }
@@ -670,8 +715,14 @@ function render(){
   nav.classList.remove('hidden');
   headerActions.innerHTML = `
     ${syncError
-      ? `<span class="text-[11px] text-red-400 flex items-center gap-1 bg-red-400/10 border border-red-400/30 px-2 py-1 rounded-full"><i data-lucide="cloud-off" class="w-3.5 h-3.5"></i> erro</span>`
-      : `<span class="text-[11px] text-emerald-400 flex items-center gap-1 bg-emerald-400/10 border border-emerald-400/30 px-2 py-1 rounded-full"><i data-lucide="cloud" class="w-3.5 h-3.5"></i> sync</span>`}
+      ? `<span class="text-[11px] text-red-400 flex items-center gap-1 bg-red-400/10 border border-red-400/30 px-2 py-1 rounded-full"><i data-lucide="cloud-off" class="w-3.5 h-3.5"></i></span>`
+      : ''}
+    ${activeTab !== 'registar' ? `
+      <button onclick="goToRegistarForDate(todayISO())"
+        class="flex items-center gap-1 bg-yellow-400 text-neutral-950 text-xs font-bold pl-2.5 pr-3 py-1.5 rounded-full active:scale-95 transition">
+        <i data-lucide="camera" class="w-3.5 h-3.5"></i> Registar
+      </button>
+    ` : ''}
   `;
 
   if (dataLoading) {
@@ -808,6 +859,8 @@ function renderDashChart(){
 
 /* ============================= REGISTAR ============================= */
 function renderRegistar(){
+  const manualMeal = manualMealId ? findMealById(manualMealId) : null;
+
   return `
     <div class="space-y-4 fade-in">
 
@@ -820,6 +873,17 @@ function renderRegistar(){
           <button onclick="viewInCalendar('${analyzeSuccess.date}')" class="text-[11px] text-emerald-300 font-semibold underline mt-1.5">Ver no Calendário</button>
         </div>
       </div>` : ''}
+
+      ${manualMeal ? `
+      <div class="rounded-2xl border border-yellow-400/40 bg-yellow-400/5 p-3 flex items-center gap-2">
+        <i data-lucide="pencil-line" class="w-4 h-4 text-yellow-400 shrink-0"></i>
+        <p class="text-xs text-yellow-200 flex-1">A construir ${mealTypeLabel(manualMeal.meal.meal_type)} · ${formatDatePT(manualMeal.meal.date)} — adiciona os alimentos abaixo.</p>
+      </div>
+      ${renderMealCard(manualMeal.meal)}
+      <button onclick="finishManualMeal()" class="w-full bg-emerald-500 text-neutral-950 font-bold text-sm rounded-xl py-2.5 flex items-center justify-center gap-1.5 active:scale-[0.98] transition">
+        <i data-lucide="check" class="w-4 h-4"></i> Concluir Refeição
+      </button>
+      ` : `
 
       <div class="card rounded-2xl p-4">
         <div class="flex items-center gap-2 mb-3">
@@ -883,7 +947,13 @@ function renderRegistar(){
             ? '<i data-lucide="loader-2" class="w-4 h-4 animate-spin"></i> A analisar com IA...'
             : `<i data-lucide="sparkles" class="w-4 h-4"></i> Analisar Refeição${photos.length>1?` (${photos.length} fotos)`:''}`}
         </button>
+
+        <button onclick="startManualMeal()" ${analyzing ? 'disabled' : ''} type="button"
+          class="w-full mt-2 border-2 border-dashed border-neutral-700 hover:border-yellow-400/50 text-slate-400 hover:text-yellow-400 text-xs font-semibold rounded-xl py-2.5 flex items-center justify-center gap-1.5 transition disabled:opacity-40">
+          <i data-lucide="pencil-line" class="w-4 h-4"></i> Adicionar Refeição Manualmente
+        </button>
       </div>
+      `}
     </div>
   `;
 }

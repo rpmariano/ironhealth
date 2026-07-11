@@ -50,13 +50,9 @@
   <main id="tab-content" class="flex-1 px-4 pt-4 pb-28 overflow-y-auto"></main>
 
   <nav id="bottomNav" class="fixed bottom-0 left-0 right-0 z-20">
-    <div class="max-w-md mx-auto bg-neutral-900/95 backdrop-blur border-t border-neutral-800 grid grid-cols-4">
+    <div class="max-w-md mx-auto bg-neutral-900/95 backdrop-blur border-t border-neutral-800 grid grid-cols-3">
       <button onclick="switchTab('dashboard')" data-tab="dashboard" class="tab-btn flex flex-col items-center gap-1 py-2.5 text-slate-500 text-[11px] font-medium">
         <i data-lucide="layout-dashboard" class="w-5 h-5"></i>Dashboard
-        <span class="tab-dot w-1 h-1 rounded-full bg-yellow-400 opacity-0"></span>
-      </button>
-      <button onclick="switchTab('registar')" data-tab="registar" class="tab-btn flex flex-col items-center gap-1 py-2.5 text-slate-500 text-[11px] font-medium">
-        <i data-lucide="camera" class="w-5 h-5"></i>Registar
         <span class="tab-dot w-1 h-1 rounded-full bg-yellow-400 opacity-0"></span>
       </button>
       <button onclick="switchTab('calendario')" data-tab="calendario" class="tab-btn flex flex-col items-center gap-1 py-2.5 text-slate-500 text-[11px] font-medium">
@@ -114,6 +110,7 @@ let syncError = null;
 
 let activeTab = 'dashboard';
 let activeRange = 'hoje'; // hoje | semana | mes
+let registarDate = todayISO(); // data pré-preenchida ao entrar em Registar a partir do Calendário
 let expandedMealId = null;
 let showAddItemForm = false;
 let photos = [];              // [{ dataUrl, base64 }] fotos comprimidas prontas a enviar
@@ -121,6 +118,7 @@ const MAX_PHOTOS = 6;
 let selectedMealType = 'almoco';
 let analyzing = false;
 let analyzeError = null;
+let analyzeSuccess = null; // { mealType, date, calories } — confirmação após registar
 let signedUrlCache = {};      // photo_path -> signed url
 let dashChart = null;
 
@@ -481,6 +479,7 @@ async function onPhotoSelected(input){
   input.value = ''; // permite voltar a escolher o mesmo ficheiro
   if (!files.length) return;
   analyzeError = null;
+  analyzeSuccess = null;
   const remaining = MAX_PHOTOS - photos.length;
   if (remaining <= 0) { analyzeError = `Máximo de ${MAX_PHOTOS} fotos.`; render(); return; }
   for (const file of files.slice(0, remaining)) {
@@ -509,7 +508,7 @@ function selectMealType(key){
 async function analyzeMeal(){
   if (!photos.length || analyzing) return;
   const date = document.getElementById('mealDate').value || todayISO();
-  analyzing = true; analyzeError = null;
+  analyzing = true; analyzeError = null; analyzeSuccess = null;
   render();
   try {
     const { data, error } = await sb.functions.invoke('analyze-meal', {
@@ -531,6 +530,7 @@ async function analyzeMeal(){
     state.meals.sort((a,b) => b.date.localeCompare(a.date) || (b.created_at||'').localeCompare(a.created_at||''));
     photos = [];
     expandedMealId = meal.id;
+    analyzeSuccess = { mealType: meal.meal_type, date: meal.date, calories: mealNutrients(meal).calories, itemCount: meal.meal_items.length };
   } catch(e) {
     console.error(e);
     analyzeError = e.message || 'Falha na análise. Tenta novamente.';
@@ -629,7 +629,27 @@ async function signOut(){
 function switchTab(tab){
   activeTab = tab;
   analyzeError = null;
+  analyzeSuccess = null;
   if (tab === 'calendario') ensureCalendarMonthLoaded(calendarViewMonth);
+  render();
+}
+
+// Entra em Registar a partir do Calendário, com a data do dia selecionado já preenchida.
+function goToRegistarForDate(dateIso){
+  registarDate = dateIso;
+  activeTab = 'registar';
+  analyzeError = null;
+  analyzeSuccess = null;
+  render();
+}
+
+// Volta ao Calendário já no dia da refeição registada.
+function viewInCalendar(dateIso){
+  calendarSelectedDate = dateIso;
+  calendarViewMonth = dateIso.slice(0,7);
+  activeTab = 'calendario';
+  analyzeSuccess = null;
+  ensureCalendarMonthLoaded(calendarViewMonth);
   render();
 }
 
@@ -660,8 +680,9 @@ function render(){
     return;
   }
 
+  const navHighlight = activeTab === 'registar' ? 'calendario' : activeTab; // Registar é acedido a partir do Calendário
   document.querySelectorAll('.tab-btn').forEach(btn => {
-    btn.classList.toggle('active', btn.dataset.tab === activeTab);
+    btn.classList.toggle('active', btn.dataset.tab === navHighlight);
   });
   if (activeTab === 'dashboard') main.innerHTML = renderDashboard();
   else if (activeTab === 'registar') main.innerHTML = renderRegistar();
@@ -787,10 +808,18 @@ function renderDashChart(){
 
 /* ============================= REGISTAR ============================= */
 function renderRegistar(){
-  const recent = state.meals.slice(0, 4);
-
   return `
     <div class="space-y-4 fade-in">
+
+      ${analyzeSuccess ? `
+      <div class="rounded-2xl border border-emerald-500/40 bg-emerald-500/10 p-4 flex items-start gap-3">
+        <i data-lucide="check-circle-2" class="w-5 h-5 text-emerald-400 shrink-0 mt-0.5"></i>
+        <div class="flex-1 min-w-0">
+          <p class="text-xs font-semibold text-emerald-300">Refeição registada</p>
+          <p class="text-[11px] text-emerald-200/80 mt-0.5">${mealTypeLabel(analyzeSuccess.mealType)} · ${formatDatePT(analyzeSuccess.date)} · ${analyzeSuccess.calories.toFixed(0)} kcal · ${analyzeSuccess.itemCount} item(s)</p>
+          <button onclick="viewInCalendar('${analyzeSuccess.date}')" class="text-[11px] text-emerald-300 font-semibold underline mt-1.5">Ver no Calendário</button>
+        </div>
+      </div>` : ''}
 
       <div class="card rounded-2xl p-4">
         <div class="flex items-center gap-2 mb-3">
@@ -832,7 +861,7 @@ function renderRegistar(){
         `}
 
         <div class="grid grid-cols-2 gap-2 mb-2">
-          <input id="mealDate" type="date" value="${todayISO()}" max="${todayISO()}"
+          <input id="mealDate" type="date" value="${registarDate}" max="${todayISO()}" onchange="registarDate = this.value"
             class="w-full bg-neutral-900 border border-neutral-800 rounded-xl px-3 py-2 text-sm text-white outline-none focus:border-yellow-400/60" />
           <div class="flex items-center justify-center text-[11px] text-slate-500">Data da refeição</div>
         </div>
@@ -854,16 +883,6 @@ function renderRegistar(){
             ? '<i data-lucide="loader-2" class="w-4 h-4 animate-spin"></i> A analisar com IA...'
             : `<i data-lucide="sparkles" class="w-4 h-4"></i> Analisar Refeição${photos.length>1?` (${photos.length} fotos)`:''}`}
         </button>
-      </div>
-
-      <div class="space-y-3">
-        <div class="flex items-center justify-between px-1">
-          <h2 class="text-xs font-semibold text-slate-500 uppercase tracking-wide">Refeições recentes</h2>
-          <button onclick="switchTab('calendario')" class="text-[11px] text-yellow-400 flex items-center gap-1">
-            Ver histórico <i data-lucide="calendar-days" class="w-3.5 h-3.5"></i>
-          </button>
-        </div>
-        ${recent.length === 0 ? `<p class="text-xs text-slate-500 px-1">Ainda sem refeições registadas.</p>` : recent.map(renderMealCard).join('')}
       </div>
     </div>
   `;
@@ -1046,7 +1065,12 @@ function renderCalendario(){
       </div>
 
       <div class="space-y-3">
-        <h2 class="text-xs font-semibold text-slate-500 px-1 uppercase tracking-wide">${formatDatePT(calendarSelectedDate)}</h2>
+        <div class="flex items-center justify-between px-1">
+          <h2 class="text-xs font-semibold text-slate-500 uppercase tracking-wide">${formatDatePT(calendarSelectedDate)}</h2>
+          <button onclick="goToRegistarForDate('${calendarSelectedDate}')" class="text-[11px] text-yellow-400 font-semibold flex items-center gap-1">
+            <i data-lucide="camera" class="w-3.5 h-3.5"></i> Registar Refeição
+          </button>
+        </div>
         ${renderCalendarDayMeals(monthMeals)}
       </div>
     </div>

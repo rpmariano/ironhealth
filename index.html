@@ -122,6 +122,8 @@ let analyzeError = null;
 let analyzeSuccess = null; // { mealType, date, calories } — confirmação após registar
 let signedUrlCache = {};      // photo_path -> signed url
 let dashChart = null;
+let selectedMacro = 'calories'; // qual macro o gráfico "por Dia" está a mostrar
+let microsCollapsed = false;
 
 let calendarViewMonth = todayISO().slice(0,7);   // 'YYYY-MM' do mês visível
 let calendarSelectedDate = todayISO();
@@ -136,6 +138,10 @@ function formatDatePT(iso){
 }
 function esc(s){ return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
 function uid(){ return 'tmp-' + Date.now().toString(36) + Math.random().toString(36).slice(2,7); }
+function hexToRgba(hex, alpha){
+  const n = parseInt(hex.replace('#',''), 16);
+  return `rgba(${(n>>16)&255}, ${(n>>8)&255}, ${n&255}, ${alpha})`;
+}
 function mealTypeLabel(key){ const t = MEAL_TYPES.find(t=>t.key===key); return t ? t.label : key; }
 function mealTypeIcon(key){ const t = MEAL_TYPES.find(t=>t.key===key); return t ? t.icon : 'utensils'; }
 
@@ -750,6 +756,16 @@ function setRange(range){
   render();
 }
 
+function selectMacro(key){
+  selectedMacro = key;
+  render();
+}
+
+function toggleMicros(){
+  microsCollapsed = !microsCollapsed;
+  render();
+}
+
 function renderDashboard(){
   const profile = state.profile || {};
   const { daysElapsed } = rangeBounds(activeRange);
@@ -762,10 +778,14 @@ function renderDashboard(){
     const remaining = goal - consumed;
     const pct = goal > 0 ? Math.min(100, (consumed/goal)*100) : 0;
     const over = remaining < 0;
+    const isSelected = selectedMacro === m.key;
     return `
-      <div class="card rounded-2xl p-4">
+      <button onclick="selectMacro('${m.key}')"
+        class="card rounded-2xl p-4 text-left transition ${isSelected ? 'ring-2' : ''}" style="${isSelected ? `--tw-ring-color:${m.color}` : ''}">
         <div class="flex items-center justify-between mb-1">
-          <span class="text-xs text-slate-400">${m.label}</span>
+          <span class="text-xs ${isSelected ? 'text-white font-semibold' : 'text-slate-400'} flex items-center gap-1">
+            ${m.label}${isSelected ? `<i data-lucide="bar-chart-3" class="w-3 h-3" style="color:${m.color}"></i>` : ''}
+          </span>
           <span class="text-[10px] px-1.5 py-0.5 rounded-full ${over ? 'bg-red-500/15 text-red-400 border border-red-500/40' : 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/30'}">
             ${over ? `${Math.abs(remaining).toFixed(0)} ${m.unit} acima` : `restam ${remaining.toFixed(0)} ${m.unit}`}
           </span>
@@ -774,7 +794,7 @@ function renderDashboard(){
         <div class="w-full h-2 rounded-full bg-neutral-800 overflow-hidden">
           <div class="h-full rounded-full" style="width:${pct}%; background:${over ? '#ef4444' : m.color}"></div>
         </div>
-      </div>
+      </button>
     `;
   }).join('');
 
@@ -803,17 +823,20 @@ function renderDashboard(){
       <div class="card rounded-2xl p-4">
         <div class="flex items-center gap-2 mb-3">
           <i data-lucide="bar-chart-3" class="w-4 h-4 text-yellow-400"></i>
-          <h2 class="text-sm font-semibold text-white">Calorias por Dia</h2>
+          <h2 class="text-sm font-semibold text-white">${MACROS.find(m=>m.key===selectedMacro).label} por Dia</h2>
         </div>
         ${state.meals.length ? `<canvas id="dashChart" height="190"></canvas>` : `<p class="text-xs text-slate-500">Regista a tua primeira refeição para veres o gráfico.</p>`}
       </div>
 
       <div class="card rounded-2xl p-4">
-        <div class="flex items-center gap-2 mb-2">
-          <i data-lucide="microscope" class="w-4 h-4 text-yellow-400"></i>
-          <h2 class="text-sm font-semibold text-white">Micronutrientes · ${rangeLabel}</h2>
-        </div>
-        ${microRows}
+        <button onclick="toggleMicros()" class="w-full flex items-center justify-between ${microsCollapsed ? '' : 'mb-2'}">
+          <div class="flex items-center gap-2">
+            <i data-lucide="microscope" class="w-4 h-4 text-yellow-400"></i>
+            <h2 class="text-sm font-semibold text-white">Micronutrientes · ${rangeLabel}</h2>
+          </div>
+          <i data-lucide="${microsCollapsed ? 'chevron-down' : 'chevron-up'}" class="w-4 h-4 text-slate-500"></i>
+        </button>
+        ${microsCollapsed ? '' : microRows}
       </div>
     </div>
   `;
@@ -824,6 +847,7 @@ function renderDashChart(){
   if (!canvas) return;
   if (dashChart) { dashChart.destroy(); dashChart = null; }
 
+  const macro = MACROS.find(m => m.key === selectedMacro);
   const { start, end } = rangeBounds(activeRange);
   const byDay = {};
   for (let d = new Date(start); d.toISOString().slice(0,10) <= end; d.setDate(d.getDate()+1)) {
@@ -831,18 +855,18 @@ function renderDashChart(){
   }
   state.meals.forEach(meal => {
     if (meal.date >= start && meal.date <= end) {
-      byDay[meal.date] = (byDay[meal.date] || 0) + mealNutrients(meal).calories;
+      byDay[meal.date] = (byDay[meal.date] || 0) + mealNutrients(meal)[macro.key];
     }
   });
   const days = Object.keys(byDay).sort();
-  const goal = Number(state.profile?.calorie_goal) || 0;
+  const goal = Number(state.profile?.[macro.goalKey]) || 0;
 
   Chart.defaults.color = '#a1a1aa';
   dashChart = new Chart(canvas, {
     data: {
       labels: days.map(d => d.slice(8,10) + '/' + d.slice(5,7)),
       datasets: [
-        { type:'bar', label:'Calorias', data:days.map(d=>byDay[d]), backgroundColor:'rgba(250,204,21,0.6)', borderRadius:4 },
+        { type:'bar', label:`${macro.label} (${macro.unit})`, data:days.map(d=>byDay[d]), backgroundColor:hexToRgba(macro.color, 0.6), borderRadius:4 },
         { type:'line', label:'Meta', data:days.map(()=>goal), borderColor:'#ef4444', borderDash:[6,4], pointRadius:0, borderWidth:1.5 },
       ]
     },

@@ -132,9 +132,9 @@
   <div class="sticky top-0 z-20 bg-neutral-950/90 backdrop-blur border-b border-neutral-800">
     <header class="px-4 pt-4 pb-3 flex items-center justify-between">
       <div class="flex items-center gap-2">
-        <div class="w-9 h-9 rounded-xl bg-orange-400/10 border border-orange-400/40 flex items-center justify-center">
+        <button onclick="handleLogoClick()" class="w-9 h-9 rounded-xl bg-orange-400/10 border border-orange-400/40 flex items-center justify-center active:scale-95 transition">
           <i data-lucide="zap" class="w-5 h-5 text-orange-400"></i>
-        </div>
+        </button>
         <div>
           <h1 class="text-base font-bold tracking-tight text-white leading-none">IronHealth</h1>
           <p id="header-date" class="text-[11px] text-slate-500 leading-none mt-1"></p>
@@ -216,6 +216,19 @@ const ACCENT_COLORS = [
   { key:'orange', label:'Laranja', light:'#fb923c', dark:'#9a3412' },
   { key:'green', label:'Verde', light:'#4ade80', dark:'#166534' },
 ];
+
+/* ============================= ADMIN ============================= */
+const ADMIN_EMAIL = 'rpmariano@gmail.com';
+function isAdmin(){ return !!currentUser && currentUser.email === ADMIN_EMAIL; }
+
+let lastLogoClickAt = 0;
+let showAdminPanel = false;
+let adminTab = 'overview'; // overview | users | metrics | logs
+let adminData = null;      // { users, profiles, meals, coachMsgs, logs }
+let adminLoading = false;
+let adminError = null;
+let adminMetricsRange = 'semana'; // hoje | semana | mes
+let adminSelectedUserId = null;   // null = métricas globais
 
 /* ============================= ESTADO ============================= */
 let state = { profile:null, meals:[] }; // meals: [{...meal, meal_items:[...]}]
@@ -319,6 +332,17 @@ function flashSyncError(e){
   syncError = (e && e.message) ? e.message : 'Erro de sincronização.';
   render();
   setTimeout(() => { syncError = null; render(); }, 4000);
+}
+
+// Regista um evento de sucesso/erro em app_logs para o painel de administrador.
+// Falha silenciosamente (não deve nunca quebrar o fluxo principal do utilizador).
+function logEvent(level, event, message, meta){
+  if (!currentUser) return;
+  sb.from('app_logs').insert({
+    user_id: currentUser.id, level, event,
+    message: message ? String(message).slice(0, 500) : null,
+    meta: meta || null,
+  }).then(({ error }) => { if (error) console.error('logEvent falhou:', error); });
 }
 
 /* Nutrientes de um item, escalados pela quantidade */
@@ -729,9 +753,11 @@ async function analyzeMeal(){
     mealNotes = '';
     expandedMealId = meal.id;
     analyzeSuccess = { mealType: meal.meal_type, date: meal.date, calories: mealNutrients(meal).calories, itemCount: meal.meal_items.length };
+    logEvent('success', 'meal_analysis', null, { mealType: meal.meal_type, date: meal.date, itemCount: meal.meal_items.length });
   } catch(e) {
     console.error(e);
     analyzeError = e.message || 'Falha na análise. Tenta novamente.';
+    logEvent('error', 'meal_analysis', analyzeError);
   }
   analyzing = false;
   render();
@@ -851,9 +877,11 @@ async function reanalyzeMeal(mealId){
     }
     editingNotesMealId = null;
     editingNotesDraft = '';
+    logEvent('success', 'meal_reanalysis', null, { mealId });
   } catch(e) {
     console.error(e);
     reanalyzeError = e.message || 'Falha na reanálise. Tenta novamente.';
+    logEvent('error', 'meal_reanalysis', reanalyzeError, { mealId });
   }
   reanalyzingMealId = null;
   render();
@@ -982,6 +1010,81 @@ function goToPerfil(){
   render();
 }
 
+// Ícone do raio no cabeçalho: um clique vai sempre para o Início. Para o admin,
+// um segundo clique no espaço de 1seg abre o painel de administrador.
+function handleLogoClick(){
+  if (!isAdmin()) { switchVertical('home'); return; }
+  const now = Date.now();
+  if (now - lastLogoClickAt < 1000) {
+    lastLogoClickAt = 0;
+    openAdminPanel();
+    return;
+  }
+  lastLogoClickAt = now;
+  switchVertical('home');
+}
+
+function openAdminPanel(){
+  if (!isAdmin()) return;
+  showAdminPanel = true;
+  render();
+  loadAdminData();
+}
+
+function closeAdminPanel(){
+  showAdminPanel = false;
+  render();
+}
+
+function setAdminTab(tab){
+  adminTab = tab;
+  render();
+  if (tab === 'metrics') requestAnimationFrame(renderAdminChart);
+}
+
+function setAdminMetricsRange(range){
+  adminMetricsRange = range;
+  render();
+  requestAnimationFrame(renderAdminChart);
+}
+
+function selectAdminUser(userId){
+  adminSelectedUserId = userId || null;
+  render();
+  requestAnimationFrame(renderAdminChart);
+}
+
+async function loadAdminData(){
+  adminLoading = true; adminError = null; render();
+  try {
+    const [usersRes, profilesRes, mealsRes, coachRes, logsRes] = await Promise.all([
+      sb.rpc('admin_list_users'),
+      sb.from('profiles').select('*'),
+      sb.from('meals').select('id, user_id, date, meal_type, created_at'),
+      sb.from('coach_messages').select('id, user_id, role, created_at'),
+      sb.from('app_logs').select('*').order('created_at', { ascending:false }).limit(300),
+    ]);
+    if (usersRes.error) throw usersRes.error;
+    if (profilesRes.error) throw profilesRes.error;
+    if (mealsRes.error) throw mealsRes.error;
+    if (coachRes.error) throw coachRes.error;
+    if (logsRes.error) throw logsRes.error;
+    adminData = {
+      users: usersRes.data || [],
+      profiles: profilesRes.data || [],
+      meals: mealsRes.data || [],
+      coachMsgs: coachRes.data || [],
+      logs: logsRes.data || [],
+    };
+  } catch(e) {
+    console.error(e);
+    adminError = e.message || 'Erro a carregar dados de administração.';
+  }
+  adminLoading = false;
+  render();
+  if (adminTab === 'metrics') requestAnimationFrame(renderAdminChart);
+}
+
 // Volta ao Calendário (vertical Nutrição) já no dia da refeição registada.
 function viewInCalendar(dateIso){
   calendarSelectedDate = dateIso;
@@ -1021,6 +1124,22 @@ function render(){
     verticalStrip.classList.add('hidden');
     headerActions.innerHTML = '';
     main.innerHTML = renderAuth();
+    if (window.lucide) lucide.createIcons();
+    return;
+  }
+
+  if (showAdminPanel) {
+    nav.classList.add('hidden');
+    verticalStrip.classList.add('hidden');
+    headerActions.innerHTML = `
+      <button onclick="closeAdminPanel()"
+        class="flex items-center gap-1 bg-neutral-800 text-slate-200 text-xs font-bold pl-2.5 pr-3 py-1.5 rounded-full active:scale-95 transition">
+        <i data-lucide="x" class="w-3.5 h-3.5"></i> Fechar
+      </button>
+    `;
+    main.classList.remove('overflow-hidden', 'pb-4', 'flex', 'flex-col');
+    main.classList.add('overflow-y-auto', 'pb-28');
+    main.innerHTML = renderAdminPanel();
     if (window.lucide) lucide.createIcons();
     return;
   }
@@ -1998,9 +2117,11 @@ async function sendCoachMessage() {
     coachMessages = coachMessages.filter(m => m.id !== '__tmp__');
     coachMessages.push(data.user_message, data.model_message);
     coachSuggestions = Array.isArray(data.suggestions) ? data.suggestions : [];
+    logEvent('success', 'coach_message', null, null);
   } catch(e) {
     coachError = e.message || 'Erro inesperado. Tenta novamente.';
     coachMessages = coachMessages.filter(m => m.id !== '__tmp__');
+    logEvent('error', 'coach_message', coachError);
   }
 
   coachLoading = false;
@@ -2015,6 +2136,249 @@ async function clearCoachConversation() {
     coachSuggestions = [];
     renderCoachInPlace();
   }
+}
+
+/* ============================= ADMIN: PAINEL ============================= */
+const ADMIN_TABS = [
+  { key:'overview', label:'Visão Geral', icon:'layout-grid' },
+  { key:'users',    label:'Utilizadores', icon:'users' },
+  { key:'metrics',  label:'Métricas', icon:'bar-chart-3' },
+  { key:'logs',     label:'Logs', icon:'scroll-text' },
+];
+
+function adminUserEmail(userId){
+  const u = (adminData && adminData.users || []).find(u => u.id === userId);
+  return u ? u.email : userId;
+}
+function adminUserLabel(userId){
+  const u = (adminData && adminData.users || []).find(u => u.id === userId);
+  if (!u) return userId || '—';
+  return u.display_name ? `${u.display_name} · ${u.email}` : u.email;
+}
+function accentColorHex(key){
+  const c = ACCENT_COLORS.find(a => a.key === key);
+  return c ? c.light : '#71717a';
+}
+
+function renderAdminPanel(){
+  if (adminLoading && !adminData) {
+    return `<div class="flex items-center justify-center h-[50vh] text-slate-500 text-xs gap-2"><i data-lucide="loader-2" class="w-4 h-4 animate-spin"></i> A carregar dados de administração...</div>`;
+  }
+  if (adminError && !adminData) {
+    return `
+      <div class="rounded-2xl border border-red-500/40 bg-red-500/10 p-4 text-center space-y-2">
+        <p class="text-xs text-red-300">${esc(adminError)}</p>
+        <button onclick="loadAdminData()" class="text-[11px] text-red-200 underline">Tentar novamente</button>
+      </div>`;
+  }
+  const body =
+    adminTab === 'overview' ? renderAdminOverview() :
+    adminTab === 'users'    ? renderAdminUsers() :
+    adminTab === 'metrics'  ? renderAdminMetrics() :
+    renderAdminLogs();
+
+  return `
+    <div class="space-y-4 fade-in">
+      <div class="flex items-center gap-2">
+        <i data-lucide="shield-check" class="w-5 h-5 text-[var(--accent)]"></i>
+        <h1 class="text-base font-bold text-white">Administração</h1>
+      </div>
+
+      <div class="flex gap-2 overflow-x-auto no-scrollbar">
+        ${ADMIN_TABS.map(t => `
+          <button onclick="setAdminTab('${t.key}')"
+            class="range-chip ${adminTab===t.key?'active':''} shrink-0 flex items-center gap-1.5 border border-neutral-700 rounded-xl py-2 px-3 text-xs font-semibold text-slate-300 transition">
+            <i data-lucide="${t.icon}" class="w-3.5 h-3.5"></i> ${t.label}
+          </button>
+        `).join('')}
+      </div>
+
+      ${body}
+    </div>
+  `;
+}
+
+function renderAdminOverview(){
+  const d = adminData;
+  const today = todayISO();
+  const logsToday = d.logs.filter(l => (l.created_at||'').slice(0,10) === today);
+  const errorsToday = logsToday.filter(l => l.level === 'error').length;
+  const successToday = logsToday.filter(l => l.level === 'success').length;
+
+  const stat = (icon, label, value, extra) => `
+    <div class="card rounded-2xl p-4">
+      <div class="flex items-center gap-2 mb-1.5 text-slate-400">
+        <i data-lucide="${icon}" class="w-4 h-4"></i>
+        <span class="text-xs">${label}</span>
+      </div>
+      <p class="text-2xl font-bold text-white leading-none">${value}</p>
+      ${extra ? `<p class="text-[11px] text-slate-500 mt-1">${extra}</p>` : ''}
+    </div>`;
+
+  return `
+    <div class="grid grid-cols-2 gap-3">
+      ${stat('users', 'Utilizadores registados', d.users.length)}
+      ${stat('utensils', 'Refeições registadas', d.meals.length)}
+      ${stat('bot', 'Mensagens ao Coach', d.coachMsgs.filter(m=>m.role==='user').length)}
+      ${stat('activity', 'Eventos hoje', logsToday.length, `${successToday} sucesso · ${errorsToday} erro`)}
+    </div>
+  `;
+}
+
+function renderAdminUsers(){
+  const d = adminData;
+  const rows = [...d.users].sort((a,b) => (b.created_at||'').localeCompare(a.created_at||''));
+  return `
+    <div class="space-y-2">
+      ${rows.map(u => {
+        const mealCount = d.meals.filter(m => m.user_id === u.id).length;
+        const msgCount = d.coachMsgs.filter(m => m.user_id === u.id && m.role === 'user').length;
+        return `
+        <button onclick="selectAdminUser('${u.id}'); setAdminTab('metrics')" class="card rounded-2xl p-3.5 w-full text-left flex items-center gap-3">
+          <span class="w-8 h-8 rounded-full shrink-0 flex items-center justify-center text-[10px] font-bold" style="background:${accentColorHex(u.accent_color)}22; color:${accentColorHex(u.accent_color)};">
+            ${esc((u.display_name || u.email || '?').slice(0,1).toUpperCase())}
+          </span>
+          <div class="flex-1 min-w-0">
+            <p class="text-sm font-semibold text-white truncate">${esc(u.display_name || '(sem nome)')}</p>
+            <p class="text-[11px] text-slate-500 truncate">${esc(u.email)}</p>
+          </div>
+          <div class="text-right shrink-0">
+            <p class="text-[11px] text-slate-400">${mealCount} refeições · ${msgCount} msgs</p>
+            <p class="text-[10px] text-slate-600 mt-0.5">${u.theme==='light'?'Tema claro':'Tema escuro'} · desde ${formatDatePT((u.created_at||'').slice(0,10) || todayISO())}</p>
+          </div>
+        </button>`;
+      }).join('') || `<p class="text-xs text-slate-500 text-center py-6">Sem utilizadores.</p>`}
+    </div>
+  `;
+}
+
+function renderAdminMetrics(){
+  const d = adminData;
+  const { start, end } = rangeBounds(adminMetricsRange);
+  const scopeMeals = d.meals.filter(m => m.date >= start && m.date <= end && (!adminSelectedUserId || m.user_id === adminSelectedUserId));
+  const scopeMsgs = d.coachMsgs.filter(m => m.role === 'user' && (m.created_at||'').slice(0,10) >= start && (m.created_at||'').slice(0,10) <= end && (!adminSelectedUserId || m.user_id === adminSelectedUserId));
+  const activeUsers = new Set(scopeMeals.map(m=>m.user_id).concat(scopeMsgs.map(m=>m.user_id))).size;
+
+  return `
+    <div class="space-y-3">
+      <div class="flex gap-2">
+        ${['hoje','semana','mes'].map(r => `
+          <button onclick="setAdminMetricsRange('${r}')"
+            class="range-chip ${adminMetricsRange===r?'active':''} flex-1 border border-neutral-700 rounded-xl py-2 text-xs font-semibold text-slate-300 transition">
+            ${r==='hoje'?'Hoje':r==='semana'?'Esta Semana':'Este Mês'}
+          </button>
+        `).join('')}
+      </div>
+
+      <select onchange="selectAdminUser(this.value)" class="w-full bg-neutral-900 border border-neutral-700 rounded-xl py-2.5 px-3 text-xs text-slate-200">
+        <option value="" ${!adminSelectedUserId?'selected':''}>Todos os utilizadores</option>
+        ${d.users.map(u => `<option value="${u.id}" ${adminSelectedUserId===u.id?'selected':''}>${esc(u.display_name || u.email)}</option>`).join('')}
+      </select>
+
+      <div class="grid grid-cols-3 gap-3">
+        <div class="card rounded-2xl p-3 text-center">
+          <p class="text-lg font-bold text-white">${scopeMeals.length}</p>
+          <p class="text-[10px] text-slate-500 mt-0.5">Refeições</p>
+        </div>
+        <div class="card rounded-2xl p-3 text-center">
+          <p class="text-lg font-bold text-white">${scopeMsgs.length}</p>
+          <p class="text-[10px] text-slate-500 mt-0.5">Msgs Coach</p>
+        </div>
+        <div class="card rounded-2xl p-3 text-center">
+          <p class="text-lg font-bold text-white">${adminSelectedUserId ? 1 : activeUsers}</p>
+          <p class="text-[10px] text-slate-500 mt-0.5">Utiliz. ativos</p>
+        </div>
+      </div>
+
+      <div class="card rounded-2xl p-4">
+        <div class="flex items-center gap-2 mb-3">
+          <i data-lucide="bar-chart-3" class="w-4 h-4 text-[var(--accent)]"></i>
+          <h2 class="text-sm font-semibold text-white">Atividade por Dia</h2>
+        </div>
+        ${(scopeMeals.length || scopeMsgs.length) ? `<canvas id="adminChart" height="190"></canvas>` : `<p class="text-xs text-slate-500">Sem atividade neste período.</p>`}
+      </div>
+    </div>
+  `;
+}
+
+let adminChartInstance = null;
+function renderAdminChart(){
+  const canvas = document.getElementById('adminChart');
+  if (!canvas || !adminData) return;
+  if (adminChartInstance) { adminChartInstance.destroy(); adminChartInstance = null; }
+
+  const { start, end } = rangeBounds(adminMetricsRange);
+  const mealsByDay = {}, msgsByDay = {};
+  for (let d = new Date(start); d.toISOString().slice(0,10) <= end; d.setDate(d.getDate()+1)) {
+    const key = d.toISOString().slice(0,10);
+    mealsByDay[key] = 0; msgsByDay[key] = 0;
+  }
+  adminData.meals.forEach(m => {
+    if (m.date >= start && m.date <= end && (!adminSelectedUserId || m.user_id === adminSelectedUserId) && mealsByDay.hasOwnProperty(m.date)) {
+      mealsByDay[m.date]++;
+    }
+  });
+  adminData.coachMsgs.forEach(m => {
+    if (m.role !== 'user') return;
+    const day = (m.created_at||'').slice(0,10);
+    if (day >= start && day <= end && (!adminSelectedUserId || m.user_id === adminSelectedUserId) && msgsByDay.hasOwnProperty(day)) {
+      msgsByDay[day]++;
+    }
+  });
+  const days = Object.keys(mealsByDay).sort();
+
+  Chart.defaults.color = theme === 'light' ? '#475569' : '#a1a1aa';
+  adminChartInstance = new Chart(canvas, {
+    type: 'bar',
+    data: {
+      labels: days.map(d => d.slice(8,10) + '/' + d.slice(5,7)),
+      datasets: [
+        { label:'Refeições', data:days.map(d=>mealsByDay[d]), backgroundColor:'rgba(16,185,129,0.6)', borderRadius:4 },
+        { label:'Msgs Coach', data:days.map(d=>msgsByDay[d]), backgroundColor:'rgba(6,182,212,0.6)', borderRadius:4 },
+      ]
+    },
+    options: {
+      responsive:true,
+      plugins:{ legend:{ labels:{ boxWidth:10, font:{size:10} } } },
+      scales: {
+        y: { beginAtZero:true, ticks:{ precision:0 }, grid:{ color: theme === 'light' ? 'rgba(148,163,184,0.35)' : 'rgba(63,63,70,0.4)' } },
+        x: { grid:{ display:false } }
+      }
+    }
+  });
+}
+
+function renderAdminLogs(){
+  const d = adminData;
+  const filter = window.__adminLogFilter || 'all';
+  const logs = d.logs.filter(l => filter === 'all' || l.level === filter);
+  return `
+    <div class="space-y-3">
+      <div class="flex gap-2">
+        ${[['all','Todos'],['success','Sucesso'],['error','Erro']].map(([k,label]) => `
+          <button onclick="window.__adminLogFilter='${k}'; render();"
+            class="range-chip ${filter===k?'active':''} flex-1 border border-neutral-700 rounded-xl py-2 text-xs font-semibold text-slate-300 transition">
+            ${label}
+          </button>
+        `).join('')}
+      </div>
+      <div class="space-y-2">
+        ${logs.map(l => `
+          <div class="card rounded-xl p-3 flex items-start gap-2.5">
+            <i data-lucide="${l.level==='error'?'alert-circle':'check-circle-2'}" class="w-4 h-4 shrink-0 mt-0.5 ${l.level==='error'?'text-red-400':'text-emerald-400'}"></i>
+            <div class="min-w-0 flex-1">
+              <div class="flex items-center justify-between gap-2">
+                <p class="text-xs font-semibold text-white truncate">${esc(l.event)}</p>
+                <p class="text-[10px] text-slate-600 shrink-0">${new Date(l.created_at).toLocaleString('pt-PT', { day:'2-digit', month:'2-digit', hour:'2-digit', minute:'2-digit' })}</p>
+              </div>
+              <p class="text-[11px] text-slate-500 truncate">${esc(adminUserLabel(l.user_id))}</p>
+              ${l.message ? `<p class="text-[11px] mt-1 ${l.level==='error'?'text-red-300/80':'text-slate-400'}">${esc(l.message)}</p>` : ''}
+            </div>
+          </div>
+        `).join('') || `<p class="text-xs text-slate-500 text-center py-6">Sem eventos.</p>`}
+      </div>
+    </div>
+  `;
 }
 
 /* ============================= INIT ============================= */
@@ -2035,6 +2399,9 @@ document.addEventListener('DOMContentLoaded', () => {
       coachMessages = [];
       coachLoading  = false;
       coachError    = null;
+      showAdminPanel = false;
+      adminData = null;
+      adminSelectedUserId = null;
       applyTheme('dark');
       render();
     }

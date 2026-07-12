@@ -127,3 +127,42 @@ create policy "own folder update" on storage.objects for update
   using (bucket_id = 'meal-photos' and (storage.foldername(name))[1] = auth.uid()::text);
 create policy "own folder delete" on storage.objects for delete
   using (bucket_id = 'meal-photos' and (storage.foldername(name))[1] = auth.uid()::text);
+
+-- ============ admin: menu escondido (duplo clique no logo), só para o email fixo abaixo ============
+create or replace function public.is_admin()
+returns boolean language sql stable as $$
+  select (auth.jwt() ->> 'email') = 'rpmariano@gmail.com';
+$$;
+
+-- acesso de leitura total (além das políticas "own rows" já existentes, que se mantêm)
+create policy "admin read all" on profiles for select using (public.is_admin());
+create policy "admin read all" on meals for select using (public.is_admin());
+create policy "admin read all" on meal_items for select using (public.is_admin());
+create policy "admin read all" on coach_messages for select using (public.is_admin());
+
+-- lista de utilizadores com email (auth.users não é exposto diretamente ao cliente)
+create or replace function public.admin_list_users()
+returns table(id uuid, email text, display_name text, created_at timestamptz, theme text, accent_color text)
+language sql security definer set search_path = public as $$
+  select u.id, u.email, p.display_name, u.created_at, p.theme, p.accent_color
+  from auth.users u
+  join public.profiles p on p.id = u.id
+  where public.is_admin()
+  order by u.created_at desc;
+$$;
+grant execute on function public.admin_list_users() to authenticated;
+
+-- ============ app_logs: registo de sucesso/erro das operações principais ============
+create table app_logs (
+  id         uuid        primary key default gen_random_uuid(),
+  user_id    uuid        references auth.users(id) on delete set null,
+  level      text        not null check (level in ('success','error')),
+  event      text        not null,
+  message    text,
+  meta       jsonb,
+  created_at timestamptz not null default now()
+);
+create index app_logs_created_idx on app_logs(created_at desc);
+alter table app_logs enable row level security;
+create policy "insert own logs" on app_logs for insert with check (auth.uid() = user_id);
+create policy "admin read all logs" on app_logs for select using (public.is_admin());

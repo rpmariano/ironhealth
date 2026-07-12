@@ -1,0 +1,22 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* Portado 1:1 de index.html — cor de sistema escolhível (Perfil), laranja por defeito */
+:root {
+  --accent: #fb923c;
+  --accent-dark: #9a3412;
+}
+
+html, body {
+  background: #09090b;
+}
+
+.ihui-card {
+  background: linear-gradient(180deg, rgba(24, 24, 27, 0.9), rgba(15, 15, 17, 0.9));
+  border: 1px solid rgba(63, 63, 70, 0.6);
+}
+
+.ihui-accent-swatch.active {
+  box-shadow: 0 0 0 2px #09090b, 0 0 0 4px currentColor;
+}

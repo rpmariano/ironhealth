@@ -274,7 +274,12 @@ async function selectAccentColor(key){
 
 function applyTheme(key){
   theme = (key === 'light') ? 'light' : 'dark';
-  document.documentElement.classList.toggle('light', theme === 'light');
+  const isLight = theme === 'light';
+  const scheme  = isLight ? 'only light' : 'only dark';
+  document.documentElement.classList.toggle('light', isLight);
+  document.documentElement.style.colorScheme = scheme;
+  const meta = document.querySelector('meta[name="color-scheme"]');
+  if (meta) meta.content = scheme;
 }
 
 async function selectTheme(key){

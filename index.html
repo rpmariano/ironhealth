@@ -732,6 +732,12 @@ function switchVertical(vertical){
   analyzeError = null;
   analyzeSuccess = null;
   abandonManualMealSession();
+  // Registar e Perfil são acedidos por atalhos dedicados, não pelo nav inferior
+  // da Nutrição (só Dashboard/Calendário) — entrar na vertical a partir daí
+  // (ex: cartão "Nutrição" no Início) não deve reabrir esses ecrãs "presos".
+  if (vertical === 'nutricao' && (activeTab === 'perfil' || activeTab === 'registar')) {
+    activeTab = 'dashboard';
+  }
   if (vertical === 'nutricao' && activeTab === 'calendario') ensureCalendarMonthLoaded(calendarViewMonth);
   render();
 }

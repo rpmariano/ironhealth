@@ -151,9 +151,14 @@ let showAddItemForm = false;
 let photos = [];              // [{ dataUrl, base64 }] fotos comprimidas prontas a enviar
 const MAX_PHOTOS = 6;
 let selectedMealType = 'almoco';
+let mealNotes = '';           // observação livre sobre a refeição, antes da análise Gemini
 let analyzing = false;
 let analyzeError = null;
 let analyzeSuccess = null; // { mealType, date, calories } — confirmação após registar
+let editingNotesMealId = null; // refeição já submetida cujas observações estão a ser editadas
+let editingNotesDraft = '';
+let reanalyzingMealId = null;  // refeição atualmente a ser reanalisada pelo Gemini
+let reanalyzeError = null;
 let signedUrlCache = {};      // photo_path -> signed url
 let dashChart = null;
 let selectedMacro = 'calories'; // qual macro o gráfico "por Dia" está a mostrar
@@ -560,6 +565,10 @@ function clearPhotos(){
   render();
 }
 
+function updateMealNotes(value){
+  mealNotes = value;
+}
+
 function selectMealType(key){
   selectedMealType = key;
   document.querySelectorAll('.mealtype-pill').forEach(b => b.classList.toggle('active', b.dataset.type === key));
@@ -572,7 +581,7 @@ async function analyzeMeal(){
   render();
   try {
     const { data, error } = await sb.functions.invoke('analyze-meal', {
-      body: { images: photos.map(p => p.base64), mime_type: 'image/jpeg', date, meal_type: selectedMealType },
+      body: { images: photos.map(p => p.base64), mime_type: 'image/jpeg', date, meal_type: selectedMealType, notes: mealNotes || null },
     });
     if (error) {
       let msg = error.message || 'Falha na análise.';
@@ -589,6 +598,7 @@ async function analyzeMeal(){
     state.meals.unshift(meal);
     state.meals.sort((a,b) => b.date.localeCompare(a.date) || (b.created_at||'').localeCompare(a.created_at||''));
     photos = [];
+    mealNotes = '';
     expandedMealId = meal.id;
     analyzeSuccess = { mealType: meal.meal_type, date: meal.date, calories: mealNutrients(meal).calories, itemCount: meal.meal_items.length };
   } catch(e) {
@@ -647,6 +657,78 @@ async function toggleMealExpand(mealId){
       } catch(e) { console.warn('signed urls', e); }
     }
   }
+}
+
+function startEditNotes(mealId){
+  const found = findMealById(mealId);
+  editingNotesMealId = mealId;
+  editingNotesDraft = (found && found.meal.notes) || '';
+  reanalyzeError = null;
+  render();
+}
+
+function cancelEditNotes(){
+  editingNotesMealId = null;
+  editingNotesDraft = '';
+  render();
+}
+
+async function saveNotesOnly(mealId){
+  if (reanalyzingMealId) return;
+  reanalyzingMealId = mealId;
+  reanalyzeError = null;
+  render();
+  try {
+    const { data, error } = await sb.from('meals').update({ notes: editingNotesDraft || null }).eq('id', mealId).select().single();
+    if (error) throw error;
+    const arrays = allLoadedMealArrays();
+    for (const arr of arrays) {
+      const idx = arr.findIndex(m => m.id === mealId);
+      if (idx !== -1) arr[idx] = { ...arr[idx], notes: data.notes };
+    }
+    editingNotesMealId = null;
+    editingNotesDraft = '';
+  } catch(e) {
+    console.error(e);
+    reanalyzeError = e.message || 'Falha a gravar observações.';
+  }
+  reanalyzingMealId = null;
+  render();
+}
+
+async function reanalyzeMeal(mealId){
+  if (reanalyzingMealId) return;
+  reanalyzingMealId = mealId;
+  reanalyzeError = null;
+  render();
+  try {
+    const { data, error } = await sb.functions.invoke('analyze-meal', {
+      body: { meal_id: mealId, notes: editingNotesDraft || null },
+    });
+    if (error) {
+      let msg = error.message || 'Falha na reanálise.';
+      if (error.context && typeof error.context.json === 'function') {
+        try { const body = await error.context.json(); if (body && body.error) msg = body.error; } catch(_){}
+      }
+      throw new Error(msg);
+    }
+    if (data && data.error) throw new Error(data.error);
+
+    const updatedMeal = data.meal;
+    updatedMeal.meal_items = data.items || [];
+    const arrays = allLoadedMealArrays();
+    for (const arr of arrays) {
+      const idx = arr.findIndex(m => m.id === mealId);
+      if (idx !== -1) arr[idx] = updatedMeal;
+    }
+    editingNotesMealId = null;
+    editingNotesDraft = '';
+  } catch(e) {
+    console.error(e);
+    reanalyzeError = e.message || 'Falha na reanálise. Tenta novamente.';
+  }
+  reanalyzingMealId = null;
+  render();
 }
 
 /* ============================= AUTENTICAÇÃO ============================= */
@@ -1158,6 +1240,13 @@ function renderRegistar(){
           `).join('')}
         </div>
 
+        <div class="mb-3">
+          <label class="text-[11px] text-slate-500 mb-1 block">Observações (opcional) — ex.: "Big Mac", "bife frito em azeite"</label>
+          <textarea id="mealNotes" rows="2" maxlength="500" placeholder="Detalhes que mudam os valores nutricionais..."
+            oninput="updateMealNotes(this.value)"
+            class="w-full bg-neutral-900 border border-neutral-800 rounded-xl px-3 py-2 text-xs text-white placeholder-slate-600 outline-none focus:border-[var(--accent)]/60 resize-none">${esc(mealNotes)}</textarea>
+        </div>
+
         ${analyzeError ? `<p class="text-[11px] text-red-400 mb-2">${esc(analyzeError)}</p>` : ''}
 
         <button onclick="analyzeMeal()" ${(!photos.length || analyzing) ? 'disabled' : ''}
@@ -1217,6 +1306,39 @@ function renderMealCard(meal){
               <p class="text-xs font-bold text-white">${n[m.key].toFixed(0)}<span class="text-[9px] font-normal text-slate-500">${m.unit==='kcal'?'':m.unit}</span></p>
             </div>
           `).join('')}
+        </div>
+
+        <div class="bg-neutral-900/60 border border-neutral-800 rounded-xl p-3">
+          <div class="flex items-center justify-between mb-1.5">
+            <p class="text-[11px] font-semibold text-slate-400 flex items-center gap-1.5">
+              <i data-lucide="message-square-text" class="w-3.5 h-3.5"></i> Observações
+            </p>
+            ${editingNotesMealId !== meal.id ? `
+              <button onclick="startEditNotes('${meal.id}')" class="text-[10px] text-[var(--accent)] font-semibold">
+                ${meal.notes ? 'Editar' : 'Adicionar'}
+              </button>
+            ` : ''}
+          </div>
+          ${editingNotesMealId === meal.id ? `
+            <textarea id="editNotes-${meal.id}" rows="2" maxlength="500" placeholder="ex.: Big Mac, bife frito em azeite..."
+              oninput="editingNotesDraft = this.value"
+              class="w-full bg-neutral-950 border border-neutral-700 rounded-lg px-2 py-1.5 text-xs text-white placeholder-slate-600 outline-none focus:border-[var(--accent)]/60 resize-none mb-2">${esc(editingNotesDraft)}</textarea>
+            ${reanalyzeError ? `<p class="text-[11px] text-red-400 mb-2">${esc(reanalyzeError)}</p>` : ''}
+            <div class="grid grid-cols-2 gap-2">
+              <button onclick="cancelEditNotes()" ${reanalyzingMealId===meal.id?'disabled':''} type="button" class="border border-neutral-700 text-slate-300 text-xs font-semibold rounded-lg py-2 disabled:opacity-40">
+                Cancelar
+              </button>
+              <button onclick="${paths.length ? `reanalyzeMeal('${meal.id}')` : `saveNotesOnly('${meal.id}')`}" ${reanalyzingMealId===meal.id ? 'disabled' : ''} type="button"
+                class="bg-[var(--accent)] text-neutral-950 text-xs font-bold rounded-lg py-2 flex items-center justify-center gap-1.5 disabled:opacity-40">
+                ${reanalyzingMealId===meal.id
+                  ? (paths.length ? '<i data-lucide="loader-2" class="w-3.5 h-3.5 animate-spin"></i> A reanalisar...' : '<i data-lucide="loader-2" class="w-3.5 h-3.5 animate-spin"></i> A gravar...')
+                  : (paths.length ? '<i data-lucide="sparkles" class="w-3.5 h-3.5"></i> Guardar e Reanalisar' : '<i data-lucide="check" class="w-3.5 h-3.5"></i> Guardar')}
+              </button>
+            </div>
+            ${!paths.length ? `<p class="text-[10px] text-slate-600 mt-1.5">Sem fotos guardadas — a observação é gravada sem reanálise.</p>` : ''}
+          ` : `
+            <p class="text-xs ${meal.notes ? 'text-slate-300' : 'text-slate-600 italic'}">${meal.notes ? esc(meal.notes) : 'Sem observações.'}</p>
+          `}
         </div>
 
         <div class="space-y-2">

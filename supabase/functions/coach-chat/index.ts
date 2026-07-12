@@ -224,6 +224,11 @@ Deno.serve(async (req) => {
     if (!geminiRes.ok) {
       const errText = await geminiRes.text();
       console.error("Gemini error:", geminiRes.status, errText);
+      if (geminiRes.status === 429) {
+        return jsonResponse({
+          error: "O coach atingiu o limite de pedidos da API neste momento. Tenta novamente dentro de alguns minutos.",
+        }, 503);
+      }
       return jsonResponse({ error: `Falha na resposta do coach (${geminiRes.status}). Tenta novamente.` }, 502);
     }
 

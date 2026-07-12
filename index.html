@@ -39,6 +39,47 @@
   .vertical-btn.active .vertical-label { color:var(--accent); }
 
   .accent-swatch.active { box-shadow:0 0 0 2px #09090b, 0 0 0 4px currentColor; }
+
+  .theme-swatch { border:1px solid #3f3f46; background:transparent; }
+  .theme-swatch.active { border-color:var(--accent); background:rgba(251,146,60,0.08); }
+  .theme-swatch.active { background:color-mix(in srgb, var(--accent) 10%, transparent); }
+
+  /* ===== Tema claro ===== */
+  html.light, html.light body { background:#f8fafc; color:#334155; }
+  html.light .card { background:#ffffff; border-color:#e2e8f0; box-shadow:0 1px 3px rgba(15,23,42,0.06); }
+  html.light .sticky.top-0 { background:rgba(248,250,252,0.92); }
+  html.light #bottomNav > div { background:rgba(255,255,255,0.95); }
+  html.light ::-webkit-scrollbar-thumb { background:#cbd5e1; }
+
+  html.light [class~="bg-neutral-950"],
+  html.light [class*="bg-neutral-950/"] { background-color:#f8fafc !important; }
+  html.light [class~="bg-neutral-900"],
+  html.light [class*="bg-neutral-900/"] { background-color:#f1f5f9 !important; }
+  html.light [class~="bg-neutral-800"] { background-color:#f1f5f9 !important; }
+  html.light [class~="bg-neutral-700"] { background-color:#cbd5e1 !important; }
+
+  html.light [class~="border-neutral-700"] { border-color:#cbd5e1 !important; }
+  html.light [class~="border-neutral-800"] { border-color:#e2e8f0 !important; }
+  html.light [class~="border-neutral-900"] { border-color:#e2e8f0 !important; }
+
+  html.light [class~="text-white"] { color:#0f172a !important; }
+  html.light [class~="text-slate-200"] { color:#1e293b !important; }
+  html.light [class~="text-slate-300"] { color:#334155 !important; }
+  html.light [class~="text-slate-400"] { color:#475569 !important; }
+  html.light [class~="text-slate-500"] { color:#64748b !important; }
+  html.light [class~="text-slate-600"] { color:#94a3b8 !important; }
+  html.light [class~="placeholder-slate-600"]::placeholder { color:#94a3b8 !important; }
+
+  html.light [class~="text-emerald-300"] { color:#047857 !important; }
+  html.light [class~="text-emerald-400"] { color:#059669 !important; }
+  html.light [class*="text-emerald-200"] { color:#047857 !important; }
+  html.light [class~="text-red-400"] { color:#dc2626 !important; }
+
+  html.light .theme-flip-text { color:#0f172a !important; }
+
+  html.light .vertical-btn .vertical-icon { background:#f1f5f9; border-color:#e2e8f0; color:#64748b; }
+  html.light .accent-swatch.active { box-shadow:0 0 0 2px #f8fafc, 0 0 0 4px currentColor; }
+  html.light .theme-swatch.active { border-color:var(--accent); background:color-mix(in srgb, var(--accent) 12%, transparent); }
 </style>
 </head>
 <body class="bg-neutral-950 text-slate-200 font-sans antialiased">
@@ -163,6 +204,7 @@ let signedUrlCache = {};      // photo_path -> signed url
 let dashChart = null;
 let selectedMacro = 'calories'; // qual macro o gráfico "por Dia" está a mostrar
 let microsCollapsed = false;
+let theme = 'dark'; // 'dark' | 'light'
 
 let calendarViewMonth = todayISO().slice(0,7);   // 'YYYY-MM' do mês visível
 let calendarSelectedDate = todayISO();
@@ -197,6 +239,22 @@ async function selectAccentColor(key){
   render();
   try {
     const { error } = await sb.from('profiles').update({ accent_color: key }).eq('id', currentUser.id);
+    if (error) throw error;
+  } catch(e) { flashSyncError(e); }
+}
+
+function applyTheme(key){
+  theme = (key === 'light') ? 'light' : 'dark';
+  document.documentElement.classList.toggle('light', theme === 'light');
+}
+
+async function selectTheme(key){
+  if (!['dark','light'].includes(key) || !state.profile) return;
+  state.profile.theme = key;
+  applyTheme(key);
+  render();
+  try {
+    const { error } = await sb.from('profiles').update({ theme: key }).eq('id', currentUser.id);
     if (error) throw error;
   } catch(e) { flashSyncError(e); }
 }
@@ -288,6 +346,7 @@ async function loadAllData(){
     }
     state.profile = profile;
     applyAccentColor(profile.accent_color);
+    applyTheme(profile.theme);
 
     // refeições desde o início do mês ou da semana (o mais antigo) — cobre os 3 presets
     const start = startOfMonthISO() < startOfWeekISO() ? startOfMonthISO() : startOfWeekISO();
@@ -1138,7 +1197,7 @@ function renderDashChart(){
   const days = Object.keys(byDay).sort();
   const goal = Number(state.profile?.[macro.goalKey]) || 0;
 
-  Chart.defaults.color = '#a1a1aa';
+  Chart.defaults.color = theme === 'light' ? '#475569' : '#a1a1aa';
   dashChart = new Chart(canvas, {
     data: {
       labels: days.map(d => d.slice(8,10) + '/' + d.slice(5,7)),
@@ -1151,7 +1210,7 @@ function renderDashChart(){
       responsive:true,
       plugins:{ legend:{ labels:{ boxWidth:10, font:{size:10} } } },
       scales: {
-        y: { beginAtZero:true, grid:{ color:'rgba(63,63,70,0.4)' } },
+        y: { beginAtZero:true, grid:{ color: theme === 'light' ? 'rgba(148,163,184,0.35)' : 'rgba(63,63,70,0.4)' } },
         x: { grid:{ display:false } }
       }
     }
@@ -1178,7 +1237,7 @@ function renderRegistar(){
       ${manualMeal ? `
       <div class="rounded-2xl border border-[var(--accent)]/40 bg-[var(--accent)]/5 p-3 flex items-center gap-2">
         <i data-lucide="pencil-line" class="w-4 h-4 text-[var(--accent)] shrink-0"></i>
-        <p class="text-xs text-white/90 flex-1">A construir ${mealTypeLabel(manualMeal.meal.meal_type)} · ${formatDatePT(manualMeal.meal.date)} — adiciona os alimentos abaixo.</p>
+        <p class="text-xs text-white/90 theme-flip-text flex-1">A construir ${mealTypeLabel(manualMeal.meal.meal_type)} · ${formatDatePT(manualMeal.meal.date)} — adiciona os alimentos abaixo.</p>
       </div>
       ${renderMealCard(manualMeal.meal)}
       <button onclick="finishManualMeal()" class="w-full bg-emerald-500 text-neutral-950 font-bold text-sm rounded-xl py-2.5 flex items-center justify-center gap-1.5 active:scale-[0.98] transition">
@@ -1557,6 +1616,25 @@ function renderPerfil(){
       </div>
 
       <div class="card rounded-2xl p-4">
+        <div class="flex items-center gap-2 mb-3">
+          <i data-lucide="sun-moon" class="w-4 h-4 text-[var(--accent)]"></i>
+          <h2 class="text-sm font-semibold text-white">Aparência</h2>
+        </div>
+        <div class="grid grid-cols-2 gap-2">
+          <button onclick="selectTheme('dark')" type="button"
+            class="theme-swatch ${(p.theme||'dark')==='dark'?'active':''} rounded-xl py-3 flex flex-col items-center gap-1.5 transition active:scale-[0.97]">
+            <i data-lucide="moon" class="w-5 h-5 text-slate-300"></i>
+            <span class="text-xs font-semibold text-white">Escuro</span>
+          </button>
+          <button onclick="selectTheme('light')" type="button"
+            class="theme-swatch ${p.theme==='light'?'active':''} rounded-xl py-3 flex flex-col items-center gap-1.5 transition active:scale-[0.97]">
+            <i data-lucide="sun" class="w-5 h-5 text-slate-300"></i>
+            <span class="text-xs font-semibold text-white">Claro</span>
+          </button>
+        </div>
+      </div>
+
+      <div class="card rounded-2xl p-4">
         <p class="text-[11px] text-slate-500 mb-3">Sessão iniciada como <b class="text-slate-300">${esc(currentUser.email||'')}</b></p>
         <button onclick="signOut()" class="w-full border border-red-500/40 text-red-400 text-xs font-semibold rounded-xl py-2.5 flex items-center justify-center gap-1.5">
           <i data-lucide="log-out" class="w-3.5 h-3.5"></i> Terminar sessão
@@ -1581,6 +1659,7 @@ document.addEventListener('DOMContentLoaded', () => {
       activeVertical = 'home';
       activeTab = 'dashboard';
       signedUrlCache = {};
+      applyTheme('dark');
       render();
     }
   });

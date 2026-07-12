@@ -20,6 +20,8 @@ create table profiles (
   fat_goal numeric not null default 70,
   accent_color text not null default 'orange'
     check (accent_color in ('blue1','blue2','pink','yellow','orange','green')),
+  theme text not null default 'dark'
+    check (theme in ('dark','light')),
   created_at timestamptz not null default now()
 );
 alter table profiles enable row level security;

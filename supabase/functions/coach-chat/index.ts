@@ -103,34 +103,65 @@ Deno.serve(async (req) => {
       .eq("id", userId)
       .maybeSingle();
 
-    // ── Dados nutricionais de hoje ───────────────────────────────────────
+    // ── Dados nutricionais dos últimos 7 dias ────────────────────────────
+    // Uma semana dá ao coach contexto suficiente sobre consistência e
+    // padrões (incluindo fins de semana) sem inchar o prompt com histórico
+    // desnecessário.
+    const NUTRITION_WINDOW_DAYS = 7;
     const todayISO = new Date().toISOString().slice(0, 10);
-    const { data: todayMeals } = await sb
-      .from("meals")
-      .select("meal_type, meal_items(quantity_grams, calories_per_100g, protein_per_100g, carbs_per_100g, fat_per_100g)")
-      .eq("user_id", userId)
-      .eq("date", todayISO);
+    const startDate = new Date();
+    startDate.setUTCDate(startDate.getUTCDate() - (NUTRITION_WINDOW_DAYS - 1));
+    const startISO = startDate.toISOString().slice(0, 10);
 
-    let kcal = 0, prot = 0, carbs = 0, fat = 0;
-    for (const meal of (todayMeals || [])) {
+    const { data: weekMeals } = await sb
+      .from("meals")
+      .select("date, meal_items(quantity_grams, calories_per_100g, protein_per_100g, carbs_per_100g, fat_per_100g)")
+      .eq("user_id", userId)
+      .gte("date", startISO)
+      .lte("date", todayISO);
+
+    const byDate: Record<string, { kcal: number; prot: number; carbs: number; fat: number; meals: number }> = {};
+    for (const meal of (weekMeals || [])) {
+      if (!byDate[meal.date]) byDate[meal.date] = { kcal: 0, prot: 0, carbs: 0, fat: 0, meals: 0 };
+      const d = byDate[meal.date];
+      d.meals += 1;
       for (const it of (meal.meal_items || [])) {
         const f = (it.quantity_grams || 0) / 100;
-        kcal  += (it.calories_per_100g || 0) * f;
-        prot  += (it.protein_per_100g  || 0) * f;
-        carbs += (it.carbs_per_100g    || 0) * f;
-        fat   += (it.fat_per_100g      || 0) * f;
+        d.kcal  += (it.calories_per_100g || 0) * f;
+        d.prot  += (it.protein_per_100g  || 0) * f;
+        d.carbs += (it.carbs_per_100g    || 0) * f;
+        d.fat   += (it.fat_per_100g      || 0) * f;
       }
     }
 
     const g = profile || {} as Record<string, unknown>;
-    const nutritionSummary = (todayMeals && todayMeals.length > 0)
-      ? `Dados nutricionais de hoje (${todayISO}), calculados automaticamente a partir das refeições registadas:\n` +
-        `- Calorias: ${kcal.toFixed(0)} kcal (meta diária: ${g.calorie_goal ?? "–"} kcal)\n` +
-        `- Proteína: ${prot.toFixed(1)} g (meta: ${g.protein_goal ?? "–"} g)\n` +
-        `- Hidratos: ${carbs.toFixed(1)} g (meta: ${g.carbs_goal ?? "–"} g)\n` +
-        `- Gordura: ${fat.toFixed(1)} g (meta: ${g.fat_goal ?? "–"} g)\n` +
-        `- Refeições registadas: ${todayMeals.length}`
-      : `Dados nutricionais de hoje (${todayISO}): sem refeições registadas ainda.`;
+    const today = byDate[todayISO];
+    const todaySummary = today
+      ? `Hoje (${todayISO}):\n` +
+        `- Calorias: ${today.kcal.toFixed(0)} kcal (meta diária: ${g.calorie_goal ?? "–"} kcal)\n` +
+        `- Proteína: ${today.prot.toFixed(1)} g (meta: ${g.protein_goal ?? "–"} g)\n` +
+        `- Hidratos: ${today.carbs.toFixed(1)} g (meta: ${g.carbs_goal ?? "–"} g)\n` +
+        `- Gordura: ${today.fat.toFixed(1)} g (meta: ${g.fat_goal ?? "–"} g)\n` +
+        `- Refeições registadas: ${today.meals}`
+      : `Hoje (${todayISO}): sem refeições registadas ainda.`;
+
+    const historyLines: string[] = [];
+    for (let i = 1; i < NUTRITION_WINDOW_DAYS; i++) {
+      const d = new Date();
+      d.setUTCDate(d.getUTCDate() - i);
+      const iso = d.toISOString().slice(0, 10);
+      const day = byDate[iso];
+      historyLines.push(
+        day
+          ? `- ${iso}: ${day.kcal.toFixed(0)} kcal, ${day.prot.toFixed(0)}g proteína, ${day.carbs.toFixed(0)}g hidratos, ${day.fat.toFixed(0)}g gordura (${day.meals} refeições)`
+          : `- ${iso}: sem refeições registadas`,
+      );
+    }
+
+    const nutritionSummary =
+      `${todaySummary}\n\n` +
+      `Histórico dos ${NUTRITION_WINDOW_DAYS - 1} dias anteriores (metas diárias: ${g.calorie_goal ?? "–"} kcal / ${g.protein_goal ?? "–"}g proteína / ${g.carbs_goal ?? "–"}g hidratos / ${g.fat_goal ?? "–"}g gordura):\n` +
+      historyLines.join("\n");
 
     // ── Histórico de conversa (últimas MAX_HISTORY mensagens) ────────────
     const { data: history } = await sb

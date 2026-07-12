@@ -5,6 +5,13 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, viewport-fit=cover" />
 <meta name="color-scheme" content="dark light" />
 <title>IronHealth</title>
+<link rel="manifest" href="manifest.json" />
+<link rel="icon" href="icon.svg" type="image/svg+xml" />
+<link rel="apple-touch-icon" href="icon.svg" />
+<meta name="apple-mobile-web-app-capable" content="yes" />
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+<meta name="apple-mobile-web-app-title" content="IronHealth" />
+<meta name="theme-color" content="#fb923c" />
 <script src="https://cdn.tailwindcss.com"></script>
 <script>tailwind.config = { darkMode: 'class' }</script>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.4/dist/chart.umd.min.js"></script>
@@ -113,8 +120,8 @@
   <div class="sticky top-0 z-20 bg-neutral-950/90 backdrop-blur border-b border-neutral-800">
     <header class="px-4 pt-4 pb-3 flex items-center justify-between">
       <div class="flex items-center gap-2">
-        <div class="w-9 h-9 rounded-xl bg-[var(--accent)]/10 border border-[var(--accent)]/40 flex items-center justify-center">
-          <i data-lucide="zap" class="w-5 h-5 text-[var(--accent)]"></i>
+        <div class="w-9 h-9 rounded-xl bg-orange-400/10 border border-orange-400/40 flex items-center justify-center">
+          <i data-lucide="zap" class="w-5 h-5 text-orange-400"></i>
         </div>
         <div>
           <h1 class="text-base font-bold tracking-tight text-white leading-none">IronHealth</h1>
@@ -840,7 +847,7 @@ function renderAuth(){
     <div class="min-h-[75vh] flex items-center justify-center px-2 fade-in">
       <div class="card rounded-2xl p-5 w-full max-w-sm space-y-4">
         <div class="flex items-center gap-2 justify-center">
-          <i data-lucide="zap" class="w-6 h-6 text-[var(--accent)]"></i>
+          <i data-lucide="zap" class="w-6 h-6 text-orange-400"></i>
           <h2 class="text-base font-bold text-white">IronHealth</h2>
         </div>
         <p class="text-xs text-slate-500 text-center">${authMode==='signin' ? 'Entra na tua conta' : 'Cria a tua conta'}</p>

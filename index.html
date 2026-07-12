@@ -1102,20 +1102,30 @@ function renderVerticalPlaceholder(v){
 /* ============================= DASHBOARD ============================= */
 function setRange(range){
   activeRange = range;
-  render();
+  refreshDashboard();
 }
 
 function selectMacro(key){
   selectedMacro = key;
-  render();
+  refreshDashboard();
+}
+
+// Atualização in-place do dashboard — não toca no header, nav ou vertical strip,
+// e não aciona a animação fade-in, eliminando o flash ao mudar range/macro.
+function refreshDashboard(){
+  const main = document.getElementById('main');
+  if (!main) return;
+  main.innerHTML = renderDashboard(false);
+  if (window.lucide) lucide.createIcons();
+  requestAnimationFrame(renderDashChart);
 }
 
 function toggleMicros(){
   microsCollapsed = !microsCollapsed;
-  render();
+  refreshDashboard();
 }
 
-function renderDashboard(){
+function renderDashboard(animate = true){
   const profile = state.profile || {};
   const { daysElapsed } = rangeBounds(activeRange);
   const totals = rangeTotals(activeRange);
@@ -1156,7 +1166,7 @@ function renderDashboard(){
   `).join('');
 
   return `
-    <div class="space-y-4 fade-in">
+    <div class="space-y-4 ${animate ? 'fade-in' : ''}">
       <div class="flex gap-2">
         ${['hoje','semana','mes'].map(r => `
           <button onclick="setRange('${r}')"

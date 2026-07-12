@@ -22,6 +22,7 @@ create table profiles (
     check (accent_color in ('blue1','blue2','pink','yellow','orange','green')),
   theme text not null default 'dark'
     check (theme in ('dark','light')),
+  coach_context text not null default '',
   created_at timestamptz not null default now()
 );
 alter table profiles enable row level security;
@@ -90,6 +91,19 @@ create index meal_items_meal_idx on meal_items(meal_id);
 create index meal_items_user_idx on meal_items(user_id);
 alter table meal_items enable row level security;
 create policy "own rows" on meal_items for all
+  using (auth.uid() = user_id) with check (auth.uid() = user_id);
+
+-- ============ coach_messages: histórico de conversa com o coach IA ============
+create table coach_messages (
+  id         uuid        primary key default gen_random_uuid(),
+  user_id    uuid        not null references auth.users(id) on delete cascade,
+  role       text        not null check (role in ('user','model')),
+  content    text        not null,
+  created_at timestamptz not null default now()
+);
+create index coach_messages_user_time_idx on coach_messages(user_id, created_at);
+alter table coach_messages enable row level security;
+create policy "own rows" on coach_messages for all
   using (auth.uid() = user_id) with check (auth.uid() = user_id);
 
 -- ============ storage: bucket privado com pasta por utilizador ============

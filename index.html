@@ -85,6 +85,23 @@
   html.light .vertical-btn.active .vertical-icon { background:#f1f5f9; border:2px solid var(--accent); color:var(--accent); }
   html.light .accent-swatch.active { box-shadow:0 0 0 2px #f8fafc, 0 0 0 4px currentColor; }
   html.light .theme-swatch.active { border-color:var(--accent); background:color-mix(in srgb, var(--accent) 12%, transparent); }
+
+  /* ===== Coach chat ===== */
+  .coach-bubble-user  { background:var(--accent); color:#09090b; border-radius:18px 18px 4px 18px; }
+  .coach-bubble-model { background:rgba(39,39,42,0.85); border:1px solid rgba(82,82,91,0.5); border-radius:18px 18px 18px 4px; }
+  html.light .coach-bubble-model { background:#ffffff; border-color:#cbd5e1; color:#0f172a; }
+  html.light .coach-bubble-user  { color:#09090b; }
+
+  /* Markdown inside coach bubbles */
+  .md-body strong { font-weight:700; }
+  .md-body em     { font-style:italic; }
+  .md-body ul     { list-style:disc inside; margin:.375rem 0; space-y:.125rem; }
+  .md-body ol     { list-style:decimal inside; margin:.375rem 0; }
+  .md-body li     { margin-left:.75rem; }
+  .md-body code   { font-family:monospace; font-size:.75rem; background:rgba(0,0,0,.25); border-radius:4px; padding:0 4px; }
+  .md-body pre    { font-family:monospace; font-size:.75rem; background:rgba(0,0,0,.3); border-radius:8px; padding:.625rem; margin:.5rem 0; overflow-x:auto; white-space:pre-wrap; }
+  html.light .md-body code { background:rgba(0,0,0,.07); }
+  html.light .md-body pre  { background:rgba(0,0,0,.05); }
 </style>
 </head>
 <body class="bg-neutral-950 text-slate-200 font-sans antialiased">
@@ -190,6 +207,10 @@ let syncError = null;
 let activeVertical = 'home'; // home | nutricao | ginasio | corrida | coach
 let activeTab = 'dashboard';
 let activeRange = 'hoje'; // hoje | semana | mes
+
+let coachMessages = []; // { id, role, content, created_at }
+let coachLoading  = false;
+let coachError    = null;
 let registarDate = todayISO(); // data pré-preenchida ao entrar em Registar a partir do Calendário
 let manualMealId = null;      // refeição a ser construída manualmente (sem foto) no Registar
 let expandedMealId = null;
@@ -363,6 +384,16 @@ async function loadAllData(){
       .order('created_at', { ascending:false });
     if (mErr) throw mErr;
     state.meals = meals || [];
+
+    // Mensagens do coach (historial completo para exibição; o edge function
+    // usa apenas as últimas MAX_HISTORY para o Gemini).
+    const { data: cMsgs } = await sb
+      .from('coach_messages')
+      .select('id, role, content, created_at')
+      .eq('user_id', userId)
+      .order('created_at', { ascending: true });
+    coachMessages = cMsgs || [];
+
     syncError = null;
   } catch(e) {
     console.error(e);
@@ -985,11 +1016,27 @@ function render(){
 
   if (activeVertical !== 'nutricao') {
     nav.classList.add('hidden');
-    if (activeVertical === 'home') main.innerHTML = renderHome();
-    else main.innerHTML = renderVerticalPlaceholder(VERTICALS.find(v => v.key === activeVertical));
-    if (window.lucide) lucide.createIcons();
+    if (activeVertical === 'coach') {
+      // Layout especial: o main torna-se um flex column sem scroll próprio
+      // para que a lista de mensagens e o input partilhem a altura disponível.
+      main.classList.remove('overflow-y-auto', 'pb-28');
+      main.classList.add('overflow-hidden', 'pb-4', 'flex', 'flex-col');
+      main.innerHTML = renderCoach();
+      if (window.lucide) lucide.createIcons();
+      scrollCoachToBottom();
+    } else {
+      main.classList.remove('overflow-hidden', 'pb-4', 'flex', 'flex-col');
+      main.classList.add('overflow-y-auto', 'pb-28');
+      if (activeVertical === 'home') main.innerHTML = renderHome();
+      else main.innerHTML = renderVerticalPlaceholder(VERTICALS.find(v => v.key === activeVertical));
+      if (window.lucide) lucide.createIcons();
+    }
     return;
   }
+
+  // Restaurar layout normal ao entrar na vertical Nutrição (caso venha do Coach)
+  main.classList.remove('overflow-hidden', 'pb-4', 'flex', 'flex-col');
+  main.classList.add('overflow-y-auto', 'pb-28');
 
   // Perfil é um atalho global (não um separador de Dashboard/Calendário) —
   // o nav inferior da Nutrição não deve ficar visível enquanto lá estivermos.
@@ -1659,6 +1706,30 @@ function renderPerfil(){
       </div>
 
       <div class="card rounded-2xl p-4">
+        <div class="flex items-center gap-2 mb-1">
+          <i data-lucide="bot" class="w-4 h-4 text-[var(--accent)]"></i>
+          <h2 class="text-sm font-semibold text-white">Contexto do Coach</h2>
+        </div>
+        <p class="text-[11px] text-slate-500 mb-2 leading-relaxed">
+          Descreve os teus objetivos, lesões ou preferências. O coach terá sempre isto em conta em todas as conversas.
+        </p>
+        <textarea id="pfCoachCtx" rows="5"
+          placeholder="Ex: Quero correr uma meia maratona em Novembro. Tenho uma lesão no joelho direito. Objetivo: ganhar massa muscular mantendo o peso atual."
+          class="w-full bg-neutral-900 border border-neutral-800 rounded-xl px-3 py-2 text-sm text-white
+                 outline-none focus:border-[var(--accent)]/60 resize-none leading-relaxed
+                 placeholder-slate-600"
+        >${esc(p.coach_context||'')}</textarea>
+        <p id="pfCoachSaved" class="hidden text-[11px] text-emerald-400 flex items-center gap-1 mt-1">
+          <i data-lucide="check" class="w-3.5 h-3.5"></i> Guardado.
+        </p>
+        <button onclick="saveCoachContext()"
+          class="mt-2 w-full bg-[var(--accent)] text-neutral-950 font-bold text-sm rounded-xl py-2.5
+                 flex items-center justify-center gap-1.5 active:scale-[0.98] transition">
+          <i data-lucide="save" class="w-4 h-4"></i> Guardar Contexto
+        </button>
+      </div>
+
+      <div class="card rounded-2xl p-4">
         <p class="text-[11px] text-slate-500 mb-3">Sessão iniciada como <b class="text-slate-300">${esc(currentUser.email||'')}</b></p>
         <button onclick="signOut()" class="w-full border border-red-500/40 text-red-400 text-xs font-semibold rounded-xl py-2.5 flex items-center justify-center gap-1.5">
           <i data-lucide="log-out" class="w-3.5 h-3.5"></i> Terminar sessão
@@ -1666,6 +1737,215 @@ function renderPerfil(){
       </div>
     </div>
   `;
+}
+
+async function saveCoachContext() {
+  const ctx = (document.getElementById('pfCoachCtx')?.value || '').trim();
+  const { error } = await sb.from('profiles').update({ coach_context: ctx }).eq('id', currentUser.id);
+  if (!error) {
+    if (state.profile) state.profile.coach_context = ctx;
+    const el = document.getElementById('pfCoachSaved');
+    if (el) { el.classList.remove('hidden'); setTimeout(() => el.classList.add('hidden'), 2000); }
+  }
+}
+
+/* ============================= COACH ============================= */
+
+// Renderizador de Markdown mínimo — escapa HTML primeiro, depois aplica formatação.
+function renderMarkdown(md) {
+  let s = md
+    .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+
+  // Blocos de código (``` ... ```)
+  s = s.replace(/```(?:\w*\n)?([\s\S]*?)```/g,
+    (_, c) => `<pre>${c.trimEnd()}</pre>`);
+  // Código inline
+  s = s.replace(/`([^`\n]+)`/g, '<code>$1</code>');
+  // Negrito e itálico
+  s = s.replace(/\*\*\*(.+?)\*\*\*/g, '<strong><em>$1</em></strong>');
+  s = s.replace(/\*\*(.+?)\*\*/g,     '<strong>$1</strong>');
+  s = s.replace(/\*(.+?)\*/g,         '<em>$1</em>');
+  // Cabeçalhos
+  s = s.replace(/^### (.+)$/gm, '<p class="font-semibold text-white text-[11px] uppercase tracking-wide mt-3 mb-0.5">$1</p>');
+  s = s.replace(/^## (.+)$/gm,  '<p class="font-bold text-white mt-3 mb-1">$1</p>');
+  s = s.replace(/^# (.+)$/gm,   '<p class="font-bold text-white text-base mt-3 mb-1">$1</p>');
+  // Listas não ordenadas
+  s = s.replace(/^[\-\*] (.+)$/gm, '<li>$1</li>');
+  // Listas ordenadas
+  s = s.replace(/^\d+\. (.+)$/gm, '<li>$1</li>');
+  // Agrupar <li> consecutivos
+  s = s.replace(/(<li>[\s\S]*?<\/li>\n?)+/g, m => `<ul>${m}</ul>`);
+  // Quebras de linha
+  s = s.replace(/\n\n/g, '<br><br>').replace(/\n/g, '<br>');
+
+  return `<div class="md-body">${s}</div>`;
+}
+
+function renderCoach() {
+  const msgs = coachMessages;
+
+  const bubbles = msgs.map(m => {
+    const isUser = m.role === 'user';
+    return `
+      <div class="flex ${isUser ? 'justify-end' : 'justify-start'}">
+        <div class="${isUser ? 'coach-bubble-user ml-10' : 'coach-bubble-model mr-6'} px-4 py-2.5 text-sm leading-relaxed">
+          ${isUser ? esc(m.content) : renderMarkdown(m.content)}
+        </div>
+      </div>`;
+  }).join('');
+
+  const typingDots = coachLoading ? `
+    <div class="flex justify-start">
+      <div class="coach-bubble-model px-4 py-3 flex gap-1 items-center">
+        <span class="w-2 h-2 rounded-full bg-slate-400 analyzing"></span>
+        <span class="w-2 h-2 rounded-full bg-slate-400 analyzing" style="animation-delay:.2s"></span>
+        <span class="w-2 h-2 rounded-full bg-slate-400 analyzing" style="animation-delay:.4s"></span>
+      </div>
+    </div>` : '';
+
+  const emptyState = msgs.length === 0 && !coachLoading ? `
+    <div class="flex flex-col items-center justify-center flex-1 text-center px-6 py-8">
+      <div class="w-16 h-16 rounded-3xl flex items-center justify-center mb-4"
+        style="background:linear-gradient(135deg,#155e75,#06b6d4)">
+        <i data-lucide="bot" class="w-8 h-8 text-white"></i>
+      </div>
+      <p class="text-sm font-bold text-white mb-1">O teu coach está pronto</p>
+      <p class="text-xs text-slate-500 leading-relaxed mb-5">
+        Pergunta sobre nutrição, treino ou corrida. Tenho acesso aos teus dados de hoje e ao teu perfil.
+      </p>
+      <div class="space-y-2 w-full max-w-xs text-left">
+        ${[
+          'Como está a minha nutrição hoje?',
+          'Cria-me um plano de treino para uma meia maratona',
+          'Que alimentos devo comer antes de treinar?'
+        ].map(s => `
+          <button onclick="coachSuggestion('${s}')"
+            class="w-full text-left text-xs text-[var(--accent)] border border-[var(--accent)]/30
+                   bg-[var(--accent)]/5 rounded-xl px-3 py-2.5 active:bg-[var(--accent)]/15 transition">
+            ${s}
+          </button>`).join('')}
+      </div>
+    </div>` : '';
+
+  return `
+    <div class="flex flex-col flex-1 min-h-0 pt-2">
+
+      <div class="flex items-center justify-between mb-3 shrink-0">
+        <div class="flex items-center gap-2.5">
+          <div class="w-9 h-9 rounded-xl flex items-center justify-center shrink-0"
+            style="background:linear-gradient(135deg,#155e75,#06b6d4)">
+            <i data-lucide="bot" class="w-5 h-5 text-white"></i>
+          </div>
+          <div>
+            <p class="text-sm font-bold text-white leading-none">Coach IronHealth</p>
+            <p class="text-[10px] text-slate-500 mt-0.5">Nutrição · Ginásio · Corrida</p>
+          </div>
+        </div>
+        ${msgs.length > 0 ? `
+          <button onclick="clearCoachConversation()"
+            class="text-[11px] text-slate-500 border border-neutral-700 rounded-lg px-2.5 py-1
+                   active:border-red-500/50 active:text-red-400 transition flex items-center gap-1">
+            <i data-lucide="trash-2" class="w-3 h-3"></i> Limpar
+          </button>` : ''}
+      </div>
+
+      <div id="coachMsgList" class="flex-1 min-h-0 overflow-y-auto space-y-3 pb-2">
+        ${msgs.length === 0 && !coachLoading ? emptyState : bubbles + typingDots}
+        ${coachError ? `<p class="text-xs text-red-400 text-center px-4 py-2">${esc(coachError)}</p>` : ''}
+      </div>
+
+      <div class="shrink-0 border-t border-neutral-800 pt-3 mt-2">
+        <div class="flex gap-2 items-end">
+          <textarea id="coachInputEl" rows="1"
+            placeholder="Escreve a tua pergunta…"
+            onkeydown="if(event.key==='Enter'&&!event.shiftKey){event.preventDefault();sendCoachMessage();}"
+            oninput="this.style.height='auto';this.style.height=Math.min(this.scrollHeight,120)+'px'"
+            class="flex-1 bg-neutral-900 border border-neutral-800 rounded-2xl px-4 py-3 text-sm
+                   text-white outline-none focus:border-[var(--accent)]/60 resize-none leading-tight"
+          ></textarea>
+          <button onclick="sendCoachMessage()" ${coachLoading ? 'disabled' : ''}
+            class="shrink-0 w-11 h-11 rounded-2xl flex items-center justify-center transition
+                   active:scale-95 ${coachLoading
+                     ? 'bg-neutral-800 text-slate-500 cursor-not-allowed'
+                     : 'bg-[var(--accent)] text-neutral-950'}">
+            <i data-lucide="${coachLoading ? 'loader-2' : 'send'}"
+               class="w-5 h-5 ${coachLoading ? 'animate-spin' : ''}"></i>
+          </button>
+        </div>
+      </div>
+    </div>`;
+}
+
+function renderCoachInPlace() {
+  if (activeVertical !== 'coach') return;
+  const main = document.getElementById('tab-content');
+  if (!main) return;
+  main.innerHTML = renderCoach();
+  if (window.lucide) lucide.createIcons();
+  scrollCoachToBottom();
+}
+
+function scrollCoachToBottom() {
+  requestAnimationFrame(() => {
+    const list = document.getElementById('coachMsgList');
+    if (list) list.scrollTop = list.scrollHeight;
+  });
+}
+
+function coachSuggestion(text) {
+  const el = document.getElementById('coachInputEl');
+  if (el) { el.value = text; el.focus(); el.style.height = 'auto'; el.style.height = Math.min(el.scrollHeight, 120) + 'px'; }
+}
+
+async function sendCoachMessage() {
+  const textarea = document.getElementById('coachInputEl');
+  if (!textarea) return;
+  const text = textarea.value.trim();
+  if (!text || coachLoading) return;
+
+  coachLoading = true;
+  coachError   = null;
+
+  // UI optimista: mostra a mensagem do utilizador imediatamente
+  const tempMsg = { id: '__tmp__', role: 'user', content: text, created_at: new Date().toISOString() };
+  coachMessages = [...coachMessages, tempMsg];
+  textarea.value = '';
+  textarea.style.height = 'auto';
+  renderCoachInPlace();
+
+  try {
+    const { data: { session } } = await sb.auth.getSession();
+    const res = await fetch(`${SUPABASE_URL}/functions/v1/coach-chat`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${session.access_token}`,
+        'apikey': SUPABASE_ANON_KEY,
+      },
+      body: JSON.stringify({ message: text }),
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || 'Erro no coach');
+
+    // Substitui a mensagem temporária pelas guardadas na BD + resposta do modelo
+    coachMessages = coachMessages.filter(m => m.id !== '__tmp__');
+    coachMessages.push(data.user_message, data.model_message);
+  } catch(e) {
+    coachError = e.message || 'Erro inesperado. Tenta novamente.';
+    coachMessages = coachMessages.filter(m => m.id !== '__tmp__');
+  }
+
+  coachLoading = false;
+  renderCoachInPlace();
+}
+
+async function clearCoachConversation() {
+  if (!confirm('Limpar toda a conversa com o coach?')) return;
+  const { error } = await sb.from('coach_messages').delete().eq('user_id', currentUser.id);
+  if (!error) {
+    coachMessages = [];
+    renderCoachInPlace();
+  }
 }
 
 /* ============================= INIT ============================= */
@@ -1683,6 +1963,9 @@ document.addEventListener('DOMContentLoaded', () => {
       activeVertical = 'home';
       activeTab = 'dashboard';
       signedUrlCache = {};
+      coachMessages = [];
+      coachLoading  = false;
+      coachError    = null;
       applyTheme('dark');
       render();
     }

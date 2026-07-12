@@ -18,6 +18,22 @@ const corsHeaders = {
   "Access-Control-Allow-Methods": "POST, OPTIONS",
 };
 
+// Resposta estruturada: separa o texto da resposta das sugestões de
+// seguimento, para o cliente poder mostrar as sugestões como botões
+// em vez de o modelo as misturar dentro do texto.
+const RESPONSE_SCHEMA = {
+  type: "OBJECT",
+  properties: {
+    reply: { type: "STRING" },
+    suggestions: {
+      type: "ARRAY",
+      items: { type: "STRING" },
+      maxItems: 3,
+    },
+  },
+  required: ["reply", "suggestions"],
+};
+
 function jsonResponse(body: unknown, status = 200): Response {
   return new Response(JSON.stringify(body), {
     status,
@@ -45,6 +61,17 @@ function buildSystemInstruction(
     `Responde sempre em português de Portugal. ` +
     `Sê direto e prático. Quando adequado, estrutura as respostas com listas ou secções curtas. ` +
     `Não sejas excessivamente longo — responde de forma concisa mas completa.\n\n` +
+    `MUITO IMPORTANTE — foco na pergunta: responde apenas ao que foi perguntado. ` +
+    `Se o utilizador pede o próximo treino, dá-lhe só o próximo treino — não expandas ` +
+    `automaticamente para um plano da semana inteira, nem inicies sugestões de nutrição ` +
+    `ou de outros temas que não foram pedidos. Não tentes ser exaustivo nem antecipar ` +
+    `tudo o que a pessoa possa querer saber.\n\n` +
+    `No campo "suggestions", propõe até 3 perguntas de seguimento curtas e específicas ` +
+    `que o utilizador possa querer fazer a seguir, escritas na primeira pessoa como se ` +
+    `fosse o próprio utilizador a perguntar (ex: "Queres um plano de nutrição para hoje?" ` +
+    `torna-se "Dá-me um plano de nutrição para hoje"). Não repitas no texto da resposta ` +
+    `(campo "reply") o convite para essas perguntas — isso é só para o campo "suggestions". ` +
+    `Se não fizer sentido nenhuma sugestão, deixa o array vazio.\n\n` +
     `Data atual: ${today}.`;
 
   const bio: string[] = [];
@@ -218,6 +245,8 @@ Deno.serve(async (req) => {
           generationConfig: {
             temperature: 0.7,
             maxOutputTokens: 3000,
+            response_mime_type: "application/json",
+            response_schema: RESPONSE_SCHEMA,
           },
         }),
       },
@@ -235,12 +264,25 @@ Deno.serve(async (req) => {
     }
 
     const geminiJson = await geminiRes.json();
-    const replyText: string | undefined =
+    const rawText: string | undefined =
       geminiJson?.candidates?.[0]?.content?.parts?.[0]?.text;
 
-    if (!replyText) {
+    if (!rawText) {
       console.error("Gemini resposta vazia:", JSON.stringify(geminiJson));
       return jsonResponse({ error: "O coach não conseguiu gerar uma resposta. Tenta novamente." }, 502);
+    }
+
+    let replyText: string;
+    let suggestions: string[] = [];
+    try {
+      const parsed = JSON.parse(rawText);
+      replyText = typeof parsed.reply === "string" && parsed.reply.trim() ? parsed.reply.trim() : rawText;
+      suggestions = Array.isArray(parsed.suggestions)
+        ? parsed.suggestions.filter((s: unknown) => typeof s === "string" && s.trim()).slice(0, 3)
+        : [];
+    } catch {
+      // Se por algum motivo não vier JSON válido, usa o texto tal como veio.
+      replyText = rawText;
     }
 
     // ── Guardar resposta do modelo ───────────────────────────────────────
@@ -255,10 +297,11 @@ Deno.serve(async (req) => {
       return jsonResponse({
         user_message: userMsg,
         model_message: { id: null, role: "model", content: replyText, created_at: new Date().toISOString() },
+        suggestions,
       });
     }
 
-    return jsonResponse({ user_message: userMsg, model_message: modelMsg });
+    return jsonResponse({ user_message: userMsg, model_message: modelMsg, suggestions });
 
   } catch (e) {
     console.error("Erro inesperado:", e);

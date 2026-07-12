@@ -233,6 +233,7 @@ let activeRange = 'hoje'; // hoje | semana | mes
 let coachMessages = []; // { id, role, content, created_at }
 let coachLoading  = false;
 let coachError    = null;
+let coachSuggestions = []; // perguntas de seguimento sugeridas pela última resposta
 let registarDate = todayISO(); // data pré-preenchida ao entrar em Registar a partir do Calendário
 let manualMealId = null;      // refeição a ser construída manualmente (sem foto) no Registar
 let expandedMealId = null;
@@ -1907,6 +1908,15 @@ function renderCoach() {
 
       <div id="coachMsgList" class="flex-1 min-h-0 overflow-y-auto space-y-3 pb-2">
         ${msgs.length === 0 && !coachLoading ? emptyState : bubbles + typingDots}
+        ${!coachLoading && coachSuggestions.length > 0 ? `
+          <div class="flex flex-wrap gap-2 mr-6">
+            ${coachSuggestions.map(s => `
+              <button onclick="coachSuggestion('${esc(s).replace(/'/g, "\\'")}')"
+                class="text-left text-xs text-[var(--accent)] border border-[var(--accent)]/30
+                       bg-[var(--accent)]/5 rounded-xl px-3 py-2 active:bg-[var(--accent)]/15 transition">
+                ${esc(s)}
+              </button>`).join('')}
+          </div>` : ''}
         ${coachError ? `<p class="text-xs text-red-400 text-center px-4 py-2">${esc(coachError)}</p>` : ''}
       </div>
 
@@ -1961,6 +1971,7 @@ async function sendCoachMessage() {
 
   coachLoading = true;
   coachError   = null;
+  coachSuggestions = [];
 
   // UI optimista: mostra a mensagem do utilizador imediatamente
   const tempMsg = { id: '__tmp__', role: 'user', content: text, created_at: new Date().toISOString() };
@@ -1986,6 +1997,7 @@ async function sendCoachMessage() {
     // Substitui a mensagem temporária pelas guardadas na BD + resposta do modelo
     coachMessages = coachMessages.filter(m => m.id !== '__tmp__');
     coachMessages.push(data.user_message, data.model_message);
+    coachSuggestions = Array.isArray(data.suggestions) ? data.suggestions : [];
   } catch(e) {
     coachError = e.message || 'Erro inesperado. Tenta novamente.';
     coachMessages = coachMessages.filter(m => m.id !== '__tmp__');
@@ -2000,6 +2012,7 @@ async function clearCoachConversation() {
   const { error } = await sb.from('coach_messages').delete().eq('user_id', currentUser.id);
   if (!error) {
     coachMessages = [];
+    coachSuggestions = [];
     renderCoachInPlace();
   }
 }

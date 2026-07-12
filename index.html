@@ -1027,6 +1027,7 @@ function handleLogoClick(){
 function openAdminPanel(){
   if (!isAdmin()) return;
   showAdminPanel = true;
+  adminLoading = true;
   render();
   loadAdminData();
 }
@@ -2161,15 +2162,15 @@ function accentColorHex(key){
 }
 
 function renderAdminPanel(){
-  if (adminLoading && !adminData) {
-    return `<div class="flex items-center justify-center h-[50vh] text-slate-500 text-xs gap-2"><i data-lucide="loader-2" class="w-4 h-4 animate-spin"></i> A carregar dados de administração...</div>`;
-  }
   if (adminError && !adminData) {
     return `
       <div class="rounded-2xl border border-red-500/40 bg-red-500/10 p-4 text-center space-y-2">
         <p class="text-xs text-red-300">${esc(adminError)}</p>
         <button onclick="loadAdminData()" class="text-[11px] text-red-200 underline">Tentar novamente</button>
       </div>`;
+  }
+  if (!adminData) {
+    return `<div class="flex items-center justify-center h-[50vh] text-slate-500 text-xs gap-2"><i data-lucide="loader-2" class="w-4 h-4 animate-spin"></i> A carregar dados de administração...</div>`;
   }
   const body =
     adminTab === 'overview' ? renderAdminOverview() :

@@ -11,7 +11,7 @@
 <script src="https://unpkg.com/lucide@latest/dist/umd/lucide.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
 <style>
-  :root { --accent:#fb923c; --accent-dark:#9a3412; }
+  :root { --accent:#fb923c; --accent-dark:#9a3412; color-scheme: only dark; }
   html, body { background:#09090b; }
   ::-webkit-scrollbar { width:6px; height:6px; }
   ::-webkit-scrollbar-thumb { background:#3f3f46; border-radius:9999px; }
@@ -51,6 +51,7 @@
   .theme-swatch.active { background:color-mix(in srgb, var(--accent) 10%, transparent); }
 
   /* ===== Tema claro ===== */
+  html.light { color-scheme: only light; }
   html.light, html.light body { background:#ffffff; color:#334155; }
   html.light .card { background:#ffffff; border-color:#d1d5db; filter:drop-shadow(0 1px 4px rgba(0,0,0,0.08)); }
   html.light .sticky.top-0 { background:rgba(255,255,255,0.95); }

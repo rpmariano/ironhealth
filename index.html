@@ -1113,7 +1113,7 @@ function selectMacro(key){
 // Atualização in-place do dashboard — não toca no header, nav ou vertical strip,
 // e não aciona a animação fade-in, eliminando o flash ao mudar range/macro.
 function refreshDashboard(){
-  const main = document.getElementById('main');
+  const main = document.getElementById('tab-content');
   if (!main) return;
   main.innerHTML = renderDashboard(false);
   if (window.lucide) lucide.createIcons();

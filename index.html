@@ -1142,11 +1142,11 @@ function renderDashboard(animate = true){
     return `
       <button onclick="selectMacro('${m.key}')"
         class="card rounded-2xl p-4 text-left transition ${isSelected ? 'ring-2' : ''}" style="${isSelected ? `--tw-ring-color:${m.color};` : ''}">
-        <div class="flex items-center justify-between mb-1">
-          <span class="text-xs ${isSelected ? 'text-white font-semibold' : 'text-slate-400'} flex items-center gap-1">
-            ${m.label}${isSelected ? `<i data-lucide="bar-chart-3" class="w-3 h-3" style="color:${m.color}"></i>` : ''}
+        <div class="flex items-center justify-between gap-1 mb-1">
+          <span class="text-xs min-w-0 truncate ${isSelected ? 'text-white font-semibold' : 'text-slate-400'} flex items-center gap-1">
+            ${m.label}${isSelected ? `<i data-lucide="bar-chart-3" class="w-3 h-3 shrink-0" style="color:${m.color}"></i>` : ''}
           </span>
-          <span class="text-[10px] px-1.5 py-0.5 rounded-full ${over ? 'bg-red-500/15 text-red-400 border border-red-500/40' : 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/30'}">
+          <span class="text-[10px] px-1.5 py-0.5 rounded-full shrink-0 whitespace-nowrap ${over ? 'bg-red-500/15 text-red-400 border border-red-500/40' : 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/30'}">
             ${over ? `${Math.abs(remaining).toFixed(0)} ${m.unit} acima` : `restam ${remaining.toFixed(0)} ${m.unit}`}
           </span>
         </div>

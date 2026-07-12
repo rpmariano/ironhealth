@@ -9,6 +9,7 @@
 <script src="https://unpkg.com/lucide@latest/dist/umd/lucide.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
 <style>
+  :root { --accent:#f472b6; --accent-dark:#9d174d; }
   html, body { background:#09090b; }
   ::-webkit-scrollbar { width:6px; height:6px; }
   ::-webkit-scrollbar-thumb { background:#3f3f46; border-radius:9999px; }
@@ -16,11 +17,11 @@
 
   .card { background:linear-gradient(180deg, rgba(24,24,27,0.9), rgba(15,15,17,0.9)); border:1px solid rgba(63,63,70,0.6); }
 
-  .tab-btn.active { color:#e837c9; }
+  .tab-btn.active { color:var(--accent); }
   .tab-btn.active .tab-dot { opacity:1; }
 
-  .range-chip.active { background:#e837c9; color:#09090b; border-color:#e837c9; }
-  .mealtype-pill.active { background:#e837c9; color:#09090b; border-color:#e837c9; font-weight:700; }
+  .range-chip.active { background:var(--accent); color:#09090b; border-color:var(--accent); }
+  .mealtype-pill.active { background:var(--accent); color:#09090b; border-color:var(--accent); font-weight:700; }
 
   .fade-in { animation: fadeIn .25s ease-out; }
   @keyframes fadeIn { from { opacity:0; transform:translateY(4px);} to {opacity:1; transform:translateY(0);} }
@@ -34,8 +35,10 @@
   .no-scrollbar { scrollbar-width:none; -ms-overflow-style:none; }
 
   .vertical-btn .vertical-icon { background:#18181b; border:1px solid #27272a; color:#71717a; }
-  .vertical-btn.active .vertical-icon { background:#e837c9; border-color:#e837c9; color:#09090b; }
-  .vertical-btn.active .vertical-label { color:#e837c9; }
+  .vertical-btn.active .vertical-icon { background:var(--accent); border-color:var(--accent); color:#09090b; }
+  .vertical-btn.active .vertical-label { color:var(--accent); }
+
+  .accent-swatch.active { box-shadow:0 0 0 2px #09090b, 0 0 0 4px currentColor; }
 </style>
 </head>
 <body class="bg-neutral-950 text-slate-200 font-sans antialiased">
@@ -44,8 +47,8 @@
   <div class="sticky top-0 z-20 bg-neutral-950/90 backdrop-blur border-b border-neutral-800">
     <header class="px-4 pt-4 pb-3 flex items-center justify-between">
       <div class="flex items-center gap-2">
-        <div class="w-9 h-9 rounded-xl bg-fuchsia-400/10 border border-fuchsia-400/40 flex items-center justify-center">
-          <i data-lucide="zap" class="w-5 h-5 text-fuchsia-400"></i>
+        <div class="w-9 h-9 rounded-xl bg-[var(--accent)]/10 border border-[var(--accent)]/40 flex items-center justify-center">
+          <i data-lucide="zap" class="w-5 h-5 text-[var(--accent)]"></i>
         </div>
         <div>
           <h1 class="text-base font-bold tracking-tight text-white leading-none">IronHealth</h1>
@@ -63,15 +66,15 @@
     <div class="max-w-md mx-auto bg-neutral-900/95 backdrop-blur border-t border-neutral-800 grid grid-cols-3">
       <button onclick="switchTab('dashboard')" data-tab="dashboard" class="tab-btn flex flex-col items-center gap-1 py-2.5 text-slate-500 text-[11px] font-medium">
         <i data-lucide="layout-dashboard" class="w-5 h-5"></i>Dashboard
-        <span class="tab-dot w-1 h-1 rounded-full bg-fuchsia-400 opacity-0"></span>
+        <span class="tab-dot w-1 h-1 rounded-full bg-[var(--accent)] opacity-0"></span>
       </button>
       <button onclick="switchTab('calendario')" data-tab="calendario" class="tab-btn flex flex-col items-center gap-1 py-2.5 text-slate-500 text-[11px] font-medium">
         <i data-lucide="calendar-days" class="w-5 h-5"></i>Calendário
-        <span class="tab-dot w-1 h-1 rounded-full bg-fuchsia-400 opacity-0"></span>
+        <span class="tab-dot w-1 h-1 rounded-full bg-[var(--accent)] opacity-0"></span>
       </button>
       <button onclick="switchTab('perfil')" data-tab="perfil" class="tab-btn flex flex-col items-center gap-1 py-2.5 text-slate-500 text-[11px] font-medium">
         <i data-lucide="user" class="w-5 h-5"></i>Perfil
-        <span class="tab-dot w-1 h-1 rounded-full bg-fuchsia-400 opacity-0"></span>
+        <span class="tab-dot w-1 h-1 rounded-full bg-[var(--accent)] opacity-0"></span>
       </button>
     </div>
   </nav>
@@ -122,6 +125,17 @@ const VERTICALS = [
     desc:'O teu treinador pessoal com IA vai analisar nutrição, treino e corrida para te dar sugestões — com memória do teu histórico e a estratégia que definires.' },
 ];
 
+// Cor de sistema escolhível no Perfil — 6 opções fixas, tons vibrantes mas não
+// demasiado escuros nem lisos. `dark` é usado no gradiente do cartão "Hoje".
+const ACCENT_COLORS = [
+  { key:'blue1', label:'Azul Céu', light:'#38bdf8', dark:'#075985' },
+  { key:'blue2', label:'Azul Índigo', light:'#818cf8', dark:'#3730a3' },
+  { key:'pink', label:'Rosa', light:'#f472b6', dark:'#9d174d' },
+  { key:'yellow', label:'Amarelo', light:'#fbbf24', dark:'#92400e' },
+  { key:'orange', label:'Laranja', light:'#fb923c', dark:'#9a3412' },
+  { key:'green', label:'Verde', light:'#4ade80', dark:'#166534' },
+];
+
 /* ============================= ESTADO ============================= */
 let state = { profile:null, meals:[] }; // meals: [{...meal, meal_items:[...]}]
 let currentUser = null;
@@ -168,6 +182,23 @@ function hexToRgba(hex, alpha){
 }
 function mealTypeLabel(key){ const t = MEAL_TYPES.find(t=>t.key===key); return t ? t.label : key; }
 function mealTypeIcon(key){ const t = MEAL_TYPES.find(t=>t.key===key); return t ? t.icon : 'utensils'; }
+
+function applyAccentColor(key){
+  const c = ACCENT_COLORS.find(a => a.key === key) || ACCENT_COLORS.find(a => a.key === 'pink');
+  document.documentElement.style.setProperty('--accent', c.light);
+  document.documentElement.style.setProperty('--accent-dark', c.dark);
+}
+
+async function selectAccentColor(key){
+  if (!ACCENT_COLORS.some(c => c.key === key) || !state.profile) return;
+  state.profile.accent_color = key;
+  applyAccentColor(key);
+  render();
+  try {
+    const { error } = await sb.from('profiles').update({ accent_color: key }).eq('id', currentUser.id);
+    if (error) throw error;
+  } catch(e) { flashSyncError(e); }
+}
 
 function flashSyncError(e){
   console.error(e);
@@ -255,6 +286,7 @@ async function loadAllData(){
       profile = created;
     }
     state.profile = profile;
+    applyAccentColor(profile.accent_color);
 
     // refeições desde o início do mês ou da semana (o mais antigo) — cobre os 3 presets
     const start = startOfMonthISO() < startOfWeekISO() ? startOfMonthISO() : startOfWeekISO();
@@ -627,22 +659,22 @@ function renderAuth(){
     <div class="min-h-[75vh] flex items-center justify-center px-2 fade-in">
       <div class="card rounded-2xl p-5 w-full max-w-sm space-y-4">
         <div class="flex items-center gap-2 justify-center">
-          <i data-lucide="zap" class="w-6 h-6 text-fuchsia-400"></i>
+          <i data-lucide="zap" class="w-6 h-6 text-[var(--accent)]"></i>
           <h2 class="text-base font-bold text-white">IronHealth</h2>
         </div>
         <p class="text-xs text-slate-500 text-center">${authMode==='signin' ? 'Entra na tua conta' : 'Cria a tua conta'}</p>
 
         <div class="space-y-2">
           <input id="authEmail" type="email" placeholder="Email"
-            class="w-full bg-neutral-900 border border-neutral-800 rounded-xl px-3 py-2 text-sm text-white placeholder-slate-600 outline-none focus:border-fuchsia-400/60" />
+            class="w-full bg-neutral-900 border border-neutral-800 rounded-xl px-3 py-2 text-sm text-white placeholder-slate-600 outline-none focus:border-[var(--accent)]/60" />
           <input id="authPassword" type="password" placeholder="Palavra-passe"
-            class="w-full bg-neutral-900 border border-neutral-800 rounded-xl px-3 py-2 text-sm text-white placeholder-slate-600 outline-none focus:border-fuchsia-400/60" />
+            class="w-full bg-neutral-900 border border-neutral-800 rounded-xl px-3 py-2 text-sm text-white placeholder-slate-600 outline-none focus:border-[var(--accent)]/60" />
         </div>
 
         ${authError ? `<p class="text-[11px] text-red-400">${esc(authError)}</p>` : ''}
 
         <button onclick="submitAuth()" ${authLoading ? 'disabled' : ''}
-          class="w-full bg-fuchsia-400 text-neutral-950 font-bold text-sm rounded-xl py-2.5 flex items-center justify-center gap-1.5 active:scale-[0.98] transition disabled:opacity-50">
+          class="w-full bg-[var(--accent)] text-neutral-950 font-bold text-sm rounded-xl py-2.5 flex items-center justify-center gap-1.5 active:scale-[0.98] transition disabled:opacity-50">
           ${authLoading ? '<i data-lucide="loader-2" class="w-4 h-4 animate-spin"></i>' : ''}
           ${authMode==='signin' ? 'Entrar' : 'Criar Conta'}
         </button>
@@ -777,7 +809,7 @@ function render(){
       : ''}
     ${showRegistarShortcut ? `
       <button onclick="goToRegistarForDate(todayISO())"
-        class="flex items-center gap-1 bg-fuchsia-400 text-neutral-950 text-xs font-bold pl-2.5 pr-3 py-1.5 rounded-full active:scale-95 transition">
+        class="flex items-center gap-1 bg-[var(--accent)] text-neutral-950 text-xs font-bold pl-2.5 pr-3 py-1.5 rounded-full active:scale-95 transition">
         <i data-lucide="camera" class="w-3.5 h-3.5"></i> Registar
       </button>
     ` : ''}
@@ -822,7 +854,7 @@ function renderHome(){
 
   return `
     <div class="space-y-4 fade-in">
-      <div class="rounded-3xl p-5 relative overflow-hidden" style="background:linear-gradient(135deg, #9d174d, #e837c9);">
+      <div class="rounded-3xl p-5 relative overflow-hidden" style="background:linear-gradient(135deg, var(--accent-dark), var(--accent));">
         <div class="relative z-10">
           <p class="text-xs font-semibold text-white/70 uppercase tracking-wide mb-1">Hoje</p>
           <p class="text-3xl font-bold text-white leading-none">${totals.calories.toFixed(0)}<span class="text-base font-semibold"> kcal</span></p>
@@ -865,7 +897,7 @@ function renderHome(){
       </div>
 
       <button onclick="goToRegistarForDate(todayISO())"
-        class="w-full bg-fuchsia-400 text-neutral-950 font-bold text-sm rounded-2xl py-3 flex items-center justify-center gap-2 active:scale-[0.98] transition">
+        class="w-full bg-[var(--accent)] text-neutral-950 font-bold text-sm rounded-2xl py-3 flex items-center justify-center gap-2 active:scale-[0.98] transition">
         <i data-lucide="camera" class="w-4 h-4"></i> Registar Refeição
       </button>
     </div>
@@ -880,7 +912,7 @@ function renderVerticalPlaceholder(v){
       </div>
       <h2 class="text-base font-bold text-white mb-1">${v.label}</h2>
       <p class="text-xs text-slate-500 max-w-xs leading-relaxed">${v.desc}</p>
-      <span class="mt-4 text-[11px] font-semibold text-fuchsia-400 bg-fuchsia-400/10 border border-fuchsia-400/30 px-3 py-1 rounded-full">Em breve</span>
+      <span class="mt-4 text-[11px] font-semibold text-[var(--accent)] bg-[var(--accent)]/10 border border-[var(--accent)]/30 px-3 py-1 rounded-full">Em breve</span>
       <button onclick="switchVertical('home')" class="mt-6 text-[11px] text-slate-500 flex items-center gap-1">
         <i data-lucide="arrow-left" class="w-3.5 h-3.5"></i> Voltar ao Início
       </button>
@@ -961,7 +993,7 @@ function renderDashboard(){
 
       <div class="card rounded-2xl p-4">
         <div class="flex items-center gap-2 mb-3">
-          <i data-lucide="bar-chart-3" class="w-4 h-4 text-fuchsia-400"></i>
+          <i data-lucide="bar-chart-3" class="w-4 h-4 text-[var(--accent)]"></i>
           <h2 class="text-sm font-semibold text-white">${MACROS.find(m=>m.key===selectedMacro).label} por Dia</h2>
         </div>
         ${state.meals.length ? `<canvas id="dashChart" height="190"></canvas>` : `<p class="text-xs text-slate-500">Regista a tua primeira refeição para veres o gráfico.</p>`}
@@ -970,7 +1002,7 @@ function renderDashboard(){
       <div class="card rounded-2xl p-4">
         <button onclick="toggleMicros()" class="w-full flex items-center justify-between ${microsCollapsed ? '' : 'mb-2'}">
           <div class="flex items-center gap-2">
-            <i data-lucide="microscope" class="w-4 h-4 text-fuchsia-400"></i>
+            <i data-lucide="microscope" class="w-4 h-4 text-[var(--accent)]"></i>
             <h2 class="text-sm font-semibold text-white">Micronutrientes · ${rangeLabel}</h2>
           </div>
           <i data-lucide="${microsCollapsed ? 'chevron-down' : 'chevron-up'}" class="w-4 h-4 text-slate-500"></i>
@@ -1038,9 +1070,9 @@ function renderRegistar(){
       </div>` : ''}
 
       ${manualMeal ? `
-      <div class="rounded-2xl border border-fuchsia-400/40 bg-fuchsia-400/5 p-3 flex items-center gap-2">
-        <i data-lucide="pencil-line" class="w-4 h-4 text-fuchsia-400 shrink-0"></i>
-        <p class="text-xs text-fuchsia-200 flex-1">A construir ${mealTypeLabel(manualMeal.meal.meal_type)} · ${formatDatePT(manualMeal.meal.date)} — adiciona os alimentos abaixo.</p>
+      <div class="rounded-2xl border border-[var(--accent)]/40 bg-[var(--accent)]/5 p-3 flex items-center gap-2">
+        <i data-lucide="pencil-line" class="w-4 h-4 text-[var(--accent)] shrink-0"></i>
+        <p class="text-xs text-white/90 flex-1">A construir ${mealTypeLabel(manualMeal.meal.meal_type)} · ${formatDatePT(manualMeal.meal.date)} — adiciona os alimentos abaixo.</p>
       </div>
       ${renderMealCard(manualMeal.meal)}
       <button onclick="finishManualMeal()" class="w-full bg-emerald-500 text-neutral-950 font-bold text-sm rounded-xl py-2.5 flex items-center justify-center gap-1.5 active:scale-[0.98] transition">
@@ -1050,7 +1082,7 @@ function renderRegistar(){
 
       <div class="card rounded-2xl p-4">
         <div class="flex items-center gap-2 mb-3">
-          <i data-lucide="camera" class="w-4 h-4 text-fuchsia-400"></i>
+          <i data-lucide="camera" class="w-4 h-4 text-[var(--accent)]"></i>
           <h2 class="text-sm font-semibold text-white">Nova Refeição</h2>
         </div>
 
@@ -1072,14 +1104,14 @@ function renderRegistar(){
             </button>
           </div>
           ${photos.length < MAX_PHOTOS ? `
-            <label class="flex items-center justify-center gap-2 border-2 border-dashed border-fuchsia-400/40 rounded-xl py-3 text-center cursor-pointer hover:border-fuchsia-400/70 hover:bg-fuchsia-400/5 transition mb-3">
+            <label class="flex items-center justify-center gap-2 border-2 border-dashed border-[var(--accent)]/40 rounded-xl py-3 text-center cursor-pointer hover:border-[var(--accent)]/70 hover:bg-[var(--accent)]/5 transition mb-3">
               <input type="file" accept="image/*" capture="environment" multiple class="hidden" onchange="onPhotoSelected(this)" />
-              <i data-lucide="image-plus" class="w-5 h-5 text-fuchsia-400"></i>
-              <span class="text-xs font-semibold text-fuchsia-400">Tirar/Adicionar outra foto</span>
+              <i data-lucide="image-plus" class="w-5 h-5 text-[var(--accent)]"></i>
+              <span class="text-xs font-semibold text-[var(--accent)]">Tirar/Adicionar outra foto</span>
             </label>
           ` : ''}
         ` : `
-          <label class="block border-2 border-dashed border-neutral-700 rounded-xl py-8 text-center cursor-pointer hover:border-fuchsia-400/50 transition mb-3">
+          <label class="block border-2 border-dashed border-neutral-700 rounded-xl py-8 text-center cursor-pointer hover:border-[var(--accent)]/50 transition mb-3">
             <input type="file" accept="image/*" capture="environment" multiple class="hidden" onchange="onPhotoSelected(this)" />
             <i data-lucide="image-plus" class="w-8 h-8 text-slate-600 mx-auto mb-2"></i>
             <p class="text-xs text-slate-400 font-medium">Tira ou escolhe fotos da refeição</p>
@@ -1089,7 +1121,7 @@ function renderRegistar(){
 
         <div class="grid grid-cols-2 gap-2 mb-2">
           <input id="mealDate" type="date" value="${registarDate}" max="${todayISO()}" onchange="registarDate = this.value"
-            class="w-full bg-neutral-900 border border-neutral-800 rounded-xl px-3 py-2 text-sm text-white outline-none focus:border-fuchsia-400/60" />
+            class="w-full bg-neutral-900 border border-neutral-800 rounded-xl px-3 py-2 text-sm text-white outline-none focus:border-[var(--accent)]/60" />
           <div class="flex items-center justify-center text-[11px] text-slate-500">Data da refeição</div>
         </div>
 
@@ -1105,14 +1137,14 @@ function renderRegistar(){
         ${analyzeError ? `<p class="text-[11px] text-red-400 mb-2">${esc(analyzeError)}</p>` : ''}
 
         <button onclick="analyzeMeal()" ${(!photos.length || analyzing) ? 'disabled' : ''}
-          class="w-full bg-fuchsia-400 text-neutral-950 font-bold text-sm rounded-xl py-2.5 flex items-center justify-center gap-1.5 active:scale-[0.98] transition disabled:opacity-40 ${analyzing?'analyzing':''}">
+          class="w-full bg-[var(--accent)] text-neutral-950 font-bold text-sm rounded-xl py-2.5 flex items-center justify-center gap-1.5 active:scale-[0.98] transition disabled:opacity-40 ${analyzing?'analyzing':''}">
           ${analyzing
             ? '<i data-lucide="loader-2" class="w-4 h-4 animate-spin"></i> A analisar com IA...'
             : `<i data-lucide="sparkles" class="w-4 h-4"></i> Analisar Refeição${photos.length>1?` (${photos.length} fotos)`:''}`}
         </button>
 
         <button onclick="startManualMeal()" ${analyzing ? 'disabled' : ''} type="button"
-          class="w-full mt-2 border-2 border-dashed border-neutral-700 hover:border-fuchsia-400/50 text-slate-400 hover:text-fuchsia-400 text-xs font-semibold rounded-xl py-2.5 flex items-center justify-center gap-1.5 transition disabled:opacity-40">
+          class="w-full mt-2 border-2 border-dashed border-neutral-700 hover:border-[var(--accent)]/50 text-slate-400 hover:text-[var(--accent)] text-xs font-semibold rounded-xl py-2.5 flex items-center justify-center gap-1.5 transition disabled:opacity-40">
           <i data-lucide="pencil-line" class="w-4 h-4"></i> Adicionar Refeição Manualmente
         </button>
       </div>
@@ -1130,8 +1162,8 @@ function renderMealCard(meal){
     <div class="card rounded-2xl overflow-hidden">
       <button onclick="toggleMealExpand('${meal.id}')" class="w-full flex items-center justify-between p-4 text-left">
         <div class="flex items-center gap-3 min-w-0">
-          <div class="w-9 h-9 rounded-xl bg-fuchsia-400/10 border border-fuchsia-400/30 flex items-center justify-center shrink-0">
-            <i data-lucide="${mealTypeIcon(meal.meal_type)}" class="w-4 h-4 text-fuchsia-400"></i>
+          <div class="w-9 h-9 rounded-xl bg-[var(--accent)]/10 border border-[var(--accent)]/30 flex items-center justify-center shrink-0">
+            <i data-lucide="${mealTypeIcon(meal.meal_type)}" class="w-4 h-4 text-[var(--accent)]"></i>
           </div>
           <div class="min-w-0">
             <p class="text-xs font-semibold text-white flex items-center gap-1">${mealTypeLabel(meal.meal_type)}${paths.length>1?`<span class="text-[9px] text-slate-500 flex items-center gap-0.5"><i data-lucide="images" class="w-3 h-3"></i>${paths.length}</span>`:''}</p>
@@ -1139,7 +1171,7 @@ function renderMealCard(meal){
           </div>
         </div>
         <div class="flex items-center gap-2 shrink-0">
-          <span class="text-xs font-bold text-fuchsia-400">${n.calories.toFixed(0)} kcal</span>
+          <span class="text-xs font-bold text-[var(--accent)]">${n.calories.toFixed(0)} kcal</span>
           <i data-lucide="${expanded?'chevron-up':'chevron-down'}" class="w-4 h-4 text-slate-500"></i>
         </div>
       </button>
@@ -1177,7 +1209,7 @@ function renderMealCard(meal){
               <div class="flex items-center gap-2 mb-1.5">
                 <input type="number" min="0" step="5" value="${Math.round(item.quantity_grams)}"
                   onchange="updateItemQuantity('${item.id}', this.value)"
-                  class="w-20 bg-neutral-950 border border-neutral-700 rounded-lg px-2 py-1 text-xs text-white outline-none focus:border-fuchsia-400/60" />
+                  class="w-20 bg-neutral-950 border border-neutral-700 rounded-lg px-2 py-1 text-xs text-white outline-none focus:border-[var(--accent)]/60" />
                 <span class="text-[10px] text-slate-500">gramas</span>
               </div>
               <p class="text-[10px] text-slate-500">
@@ -1188,39 +1220,39 @@ function renderMealCard(meal){
         </div>
 
         ${expandedMealId === meal.id && showAddItemForm ? `
-          <div class="bg-neutral-900/60 border border-fuchsia-400/30 rounded-xl p-3 space-y-2">
-            <p class="text-xs font-semibold text-fuchsia-400 flex items-center gap-1.5">
+          <div class="bg-neutral-900/60 border border-[var(--accent)]/30 rounded-xl p-3 space-y-2">
+            <p class="text-xs font-semibold text-[var(--accent)] flex items-center gap-1.5">
               <i data-lucide="plus-circle" class="w-3.5 h-3.5"></i> Novo Alimento
             </p>
             <input id="newItemName" type="text" placeholder="Nome do alimento"
-              class="w-full bg-neutral-950 border border-neutral-700 rounded-lg px-2 py-1.5 text-xs text-white placeholder-slate-600 outline-none focus:border-fuchsia-400/60" />
+              class="w-full bg-neutral-950 border border-neutral-700 rounded-lg px-2 py-1.5 text-xs text-white placeholder-slate-600 outline-none focus:border-[var(--accent)]/60" />
             <div class="grid grid-cols-2 gap-2">
               <input id="newItemGrams" type="number" min="0" step="5" placeholder="Gramas"
-                class="w-full bg-neutral-950 border border-neutral-700 rounded-lg px-2 py-1.5 text-xs text-white placeholder-slate-600 outline-none focus:border-fuchsia-400/60" />
+                class="w-full bg-neutral-950 border border-neutral-700 rounded-lg px-2 py-1.5 text-xs text-white placeholder-slate-600 outline-none focus:border-[var(--accent)]/60" />
               <input id="newItemCalories" type="number" min="0" step="1" placeholder="Calorias (kcal)"
-                class="w-full bg-neutral-950 border border-neutral-700 rounded-lg px-2 py-1.5 text-xs text-white placeholder-slate-600 outline-none focus:border-fuchsia-400/60" />
+                class="w-full bg-neutral-950 border border-neutral-700 rounded-lg px-2 py-1.5 text-xs text-white placeholder-slate-600 outline-none focus:border-[var(--accent)]/60" />
             </div>
             <div class="grid grid-cols-3 gap-2">
               <input id="newItemProtein" type="number" min="0" step="0.5" placeholder="Prot. (g)"
-                class="w-full bg-neutral-950 border border-neutral-700 rounded-lg px-2 py-1.5 text-xs text-white placeholder-slate-600 outline-none focus:border-fuchsia-400/60" />
+                class="w-full bg-neutral-950 border border-neutral-700 rounded-lg px-2 py-1.5 text-xs text-white placeholder-slate-600 outline-none focus:border-[var(--accent)]/60" />
               <input id="newItemCarbs" type="number" min="0" step="0.5" placeholder="Hidr. (g)"
-                class="w-full bg-neutral-950 border border-neutral-700 rounded-lg px-2 py-1.5 text-xs text-white placeholder-slate-600 outline-none focus:border-fuchsia-400/60" />
+                class="w-full bg-neutral-950 border border-neutral-700 rounded-lg px-2 py-1.5 text-xs text-white placeholder-slate-600 outline-none focus:border-[var(--accent)]/60" />
               <input id="newItemFat" type="number" min="0" step="0.5" placeholder="Gord. (g)"
-                class="w-full bg-neutral-950 border border-neutral-700 rounded-lg px-2 py-1.5 text-xs text-white placeholder-slate-600 outline-none focus:border-fuchsia-400/60" />
+                class="w-full bg-neutral-950 border border-neutral-700 rounded-lg px-2 py-1.5 text-xs text-white placeholder-slate-600 outline-none focus:border-[var(--accent)]/60" />
             </div>
             <p id="newItemError" class="hidden text-[11px] text-red-400"></p>
             <div class="grid grid-cols-2 gap-2 pt-1">
               <button onclick="toggleAddItemForm()" type="button" class="border border-neutral-700 text-slate-300 text-xs font-semibold rounded-lg py-2">
                 Cancelar
               </button>
-              <button onclick="submitNewItem('${meal.id}')" type="button" class="bg-fuchsia-400 text-neutral-950 text-xs font-bold rounded-lg py-2 flex items-center justify-center gap-1.5">
+              <button onclick="submitNewItem('${meal.id}')" type="button" class="bg-[var(--accent)] text-neutral-950 text-xs font-bold rounded-lg py-2 flex items-center justify-center gap-1.5">
                 <i data-lucide="check" class="w-3.5 h-3.5"></i> Guardar Alimento
               </button>
             </div>
           </div>
         ` : `
           <button onclick="toggleAddItemForm()" type="button"
-            class="w-full border-2 border-dashed border-neutral-700 hover:border-fuchsia-400/50 text-slate-400 hover:text-fuchsia-400 text-xs font-semibold rounded-xl py-2.5 flex items-center justify-center gap-1.5 transition">
+            class="w-full border-2 border-dashed border-neutral-700 hover:border-[var(--accent)]/50 text-slate-400 hover:text-[var(--accent)] text-xs font-semibold rounded-xl py-2.5 flex items-center justify-center gap-1.5 transition">
             <i data-lucide="plus" class="w-4 h-4"></i> Adicionar Alimento
           </button>
         `}
@@ -1281,7 +1313,7 @@ function renderCalendario(){
             return `
               <button onclick="selectCalendarDay('${dateIso}')"
                 class="aspect-square flex flex-col items-center justify-center rounded-xl text-xs transition
-                  ${isSelected ? 'bg-fuchsia-400 text-neutral-950 font-bold' : isToday ? 'border border-fuchsia-400/60 text-white' : 'text-slate-300 hover:bg-neutral-800'}">
+                  ${isSelected ? 'bg-[var(--accent)] text-neutral-950 font-bold' : isToday ? 'border border-[var(--accent)]/60 text-white' : 'text-slate-300 hover:bg-neutral-800'}">
                 ${dayNum}
                 <span class="w-1.5 h-1.5 rounded-full mt-0.5 ${isSelected ? 'bg-neutral-950' : dotColor}"></span>
               </button>
@@ -1300,7 +1332,7 @@ function renderCalendario(){
       <div class="space-y-3">
         <div class="flex items-center justify-between px-1">
           <h2 class="text-xs font-semibold text-slate-500 uppercase tracking-wide">${formatDatePT(calendarSelectedDate)}</h2>
-          <button onclick="goToRegistarForDate('${calendarSelectedDate}')" class="text-[11px] text-fuchsia-400 font-semibold flex items-center gap-1">
+          <button onclick="goToRegistarForDate('${calendarSelectedDate}')" class="text-[11px] text-[var(--accent)] font-semibold flex items-center gap-1">
             <i data-lucide="camera" class="w-3.5 h-3.5"></i> Registar Refeição
           </button>
         </div>
@@ -1326,41 +1358,55 @@ function renderPerfil(){
     <div class="space-y-4 fade-in">
       <div class="card rounded-2xl p-4">
         <div class="flex items-center gap-2 mb-3">
-          <i data-lucide="user" class="w-4 h-4 text-fuchsia-400"></i>
+          <i data-lucide="user" class="w-4 h-4 text-[var(--accent)]"></i>
           <h2 class="text-sm font-semibold text-white">O meu Perfil</h2>
         </div>
         <div class="space-y-2">
           <div>
             <label class="text-[11px] text-slate-500">Nome</label>
             <input id="pfName" type="text" value="${esc(p.display_name||'')}"
-              class="w-full bg-neutral-900 border border-neutral-800 rounded-xl px-3 py-2 text-sm text-white outline-none focus:border-fuchsia-400/60" />
+              class="w-full bg-neutral-900 border border-neutral-800 rounded-xl px-3 py-2 text-sm text-white outline-none focus:border-[var(--accent)]/60" />
           </div>
           <div class="grid grid-cols-2 gap-2">
             <div>
               <label class="text-[11px] text-slate-500">Meta calorias (kcal/dia)</label>
               <input id="pfCal" type="number" min="1" value="${p.calorie_goal||2000}"
-                class="w-full bg-neutral-900 border border-neutral-800 rounded-xl px-3 py-2 text-sm text-white outline-none focus:border-fuchsia-400/60" />
+                class="w-full bg-neutral-900 border border-neutral-800 rounded-xl px-3 py-2 text-sm text-white outline-none focus:border-[var(--accent)]/60" />
             </div>
             <div>
               <label class="text-[11px] text-slate-500">Meta proteína (g/dia)</label>
               <input id="pfPro" type="number" min="1" value="${p.protein_goal||150}"
-                class="w-full bg-neutral-900 border border-neutral-800 rounded-xl px-3 py-2 text-sm text-white outline-none focus:border-fuchsia-400/60" />
+                class="w-full bg-neutral-900 border border-neutral-800 rounded-xl px-3 py-2 text-sm text-white outline-none focus:border-[var(--accent)]/60" />
             </div>
             <div>
               <label class="text-[11px] text-slate-500">Meta hidratos (g/dia)</label>
               <input id="pfCarb" type="number" min="1" value="${p.carbs_goal||200}"
-                class="w-full bg-neutral-900 border border-neutral-800 rounded-xl px-3 py-2 text-sm text-white outline-none focus:border-fuchsia-400/60" />
+                class="w-full bg-neutral-900 border border-neutral-800 rounded-xl px-3 py-2 text-sm text-white outline-none focus:border-[var(--accent)]/60" />
             </div>
             <div>
               <label class="text-[11px] text-slate-500">Meta gordura (g/dia)</label>
               <input id="pfFat" type="number" min="1" value="${p.fat_goal||70}"
-                class="w-full bg-neutral-900 border border-neutral-800 rounded-xl px-3 py-2 text-sm text-white outline-none focus:border-fuchsia-400/60" />
+                class="w-full bg-neutral-900 border border-neutral-800 rounded-xl px-3 py-2 text-sm text-white outline-none focus:border-[var(--accent)]/60" />
             </div>
           </div>
           <p id="pfSaved" class="hidden text-[11px] text-emerald-400 flex items-center gap-1"><i data-lucide="check" class="w-3.5 h-3.5"></i> Guardado.</p>
           <button onclick="saveProfileFromForm()" class="w-full bg-emerald-500 text-neutral-950 font-bold text-sm rounded-xl py-2.5 flex items-center justify-center gap-1.5 active:scale-[0.98] transition">
             <i data-lucide="save" class="w-4 h-4"></i> Guardar Metas
           </button>
+        </div>
+      </div>
+
+      <div class="card rounded-2xl p-4">
+        <div class="flex items-center gap-2 mb-3">
+          <i data-lucide="palette" class="w-4 h-4 text-[var(--accent)]"></i>
+          <h2 class="text-sm font-semibold text-white">Cor de Sistema</h2>
+        </div>
+        <div class="grid grid-cols-6 gap-2">
+          ${ACCENT_COLORS.map(c => `
+            <button onclick="selectAccentColor('${c.key}')" title="${c.label}"
+              class="accent-swatch ${p.accent_color===c.key?'active':''} aspect-square rounded-full transition active:scale-90"
+              style="background:${c.light}; color:${c.light};"></button>
+          `).join('')}
         </div>
       </div>
 

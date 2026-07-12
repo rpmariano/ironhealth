@@ -9,7 +9,7 @@
 <script src="https://unpkg.com/lucide@latest/dist/umd/lucide.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
 <style>
-  :root { --accent:#f472b6; --accent-dark:#9d174d; }
+  :root { --accent:#fb923c; --accent-dark:#9a3412; }
   html, body { background:#09090b; }
   ::-webkit-scrollbar { width:6px; height:6px; }
   ::-webkit-scrollbar-thumb { background:#3f3f46; border-radius:9999px; }
@@ -180,7 +180,7 @@ function mealTypeLabel(key){ const t = MEAL_TYPES.find(t=>t.key===key); return t
 function mealTypeIcon(key){ const t = MEAL_TYPES.find(t=>t.key===key); return t ? t.icon : 'utensils'; }
 
 function applyAccentColor(key){
-  const c = ACCENT_COLORS.find(a => a.key === key) || ACCENT_COLORS.find(a => a.key === 'pink');
+  const c = ACCENT_COLORS.find(a => a.key === key) || ACCENT_COLORS.find(a => a.key === 'orange');
   document.documentElement.style.setProperty('--accent', c.light);
   document.documentElement.style.setProperty('--accent-dark', c.dark);
 }
@@ -872,33 +872,45 @@ function renderHome(){
       </div>
 
       <div class="grid grid-cols-2 gap-3">
-        <button onclick="switchVertical('nutricao')" class="rounded-2xl p-4 text-left relative overflow-hidden min-h-[132px] flex flex-col justify-between" style="background:linear-gradient(135deg, #065f46, #10b981);">
-          <i data-lucide="utensils" class="w-6 h-6 text-white/90"></i>
-          <div>
-            <p class="text-xs font-semibold text-white">Nutrição</p>
-            <p class="text-[11px] text-white/80 mt-0.5">${mealsToday} refeição(ões) hoje</p>
+        <button onclick="switchVertical('nutricao')" class="rounded-2xl p-4 text-left relative overflow-hidden min-h-[132px]" style="background:linear-gradient(135deg, #065f46, #10b981);">
+          <div class="relative z-10 h-full flex flex-col justify-between">
+            <i data-lucide="utensils" class="w-6 h-6 text-white/90"></i>
+            <div>
+              <p class="text-xs font-semibold text-white">Nutrição</p>
+              <p class="text-[11px] text-white/80 mt-0.5">${mealsToday} refeição(ões) hoje</p>
+            </div>
           </div>
+          <i data-lucide="utensils" class="w-20 h-20 absolute -right-2 -bottom-2 text-white/15"></i>
         </button>
-        <button onclick="switchVertical('ginasio')" class="rounded-2xl p-4 text-left relative overflow-hidden min-h-[132px] flex flex-col justify-between" style="background:linear-gradient(135deg, #1e3a8a, #6366f1);">
-          <i data-lucide="dumbbell" class="w-6 h-6 text-white/90"></i>
-          <div>
-            <p class="text-xs font-semibold text-white">Ginásio</p>
-            <p class="text-[11px] text-white/80 mt-0.5">Em breve</p>
+        <button onclick="switchVertical('ginasio')" class="rounded-2xl p-4 text-left relative overflow-hidden min-h-[132px]" style="background:linear-gradient(135deg, #1e3a8a, #6366f1);">
+          <div class="relative z-10 h-full flex flex-col justify-between">
+            <i data-lucide="dumbbell" class="w-6 h-6 text-white/90"></i>
+            <div>
+              <p class="text-xs font-semibold text-white">Ginásio</p>
+              <p class="text-[11px] text-white/80 mt-0.5">Em breve</p>
+            </div>
           </div>
+          <i data-lucide="dumbbell" class="w-20 h-20 absolute -right-2 -bottom-2 text-white/15"></i>
         </button>
-        <button onclick="switchVertical('corrida')" class="rounded-2xl p-4 text-left relative overflow-hidden min-h-[132px] flex flex-col justify-between" style="background:linear-gradient(135deg, #9a3412, #f97316);">
-          <i data-lucide="footprints" class="w-6 h-6 text-white/90"></i>
-          <div>
-            <p class="text-xs font-semibold text-white">Corrida</p>
-            <p class="text-[11px] text-white/80 mt-0.5">Em breve</p>
+        <button onclick="switchVertical('corrida')" class="rounded-2xl p-4 text-left relative overflow-hidden min-h-[132px]" style="background:linear-gradient(135deg, #9a3412, #f97316);">
+          <div class="relative z-10 h-full flex flex-col justify-between">
+            <i data-lucide="footprints" class="w-6 h-6 text-white/90"></i>
+            <div>
+              <p class="text-xs font-semibold text-white">Corrida</p>
+              <p class="text-[11px] text-white/80 mt-0.5">Em breve</p>
+            </div>
           </div>
+          <i data-lucide="footprints" class="w-20 h-20 absolute -right-2 -bottom-2 text-white/15"></i>
         </button>
-        <button onclick="switchVertical('coach')" class="rounded-2xl p-4 text-left relative overflow-hidden min-h-[132px] flex flex-col justify-between" style="background:linear-gradient(135deg, #155e75, #06b6d4);">
-          <i data-lucide="bot" class="w-6 h-6 text-white/90"></i>
-          <div>
-            <p class="text-xs font-semibold text-white">Coach</p>
-            <p class="text-[11px] text-white/80 mt-0.5">Em breve</p>
+        <button onclick="switchVertical('coach')" class="rounded-2xl p-4 text-left relative overflow-hidden min-h-[132px]" style="background:linear-gradient(135deg, #155e75, #06b6d4);">
+          <div class="relative z-10 h-full flex flex-col justify-between">
+            <i data-lucide="bot" class="w-6 h-6 text-white/90"></i>
+            <div>
+              <p class="text-xs font-semibold text-white">Coach</p>
+              <p class="text-[11px] text-white/80 mt-0.5">Em breve</p>
+            </div>
           </div>
+          <i data-lucide="bot" class="w-20 h-20 absolute -right-2 -bottom-2 text-white/15"></i>
         </button>
       </div>
 

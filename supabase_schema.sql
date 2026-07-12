@@ -18,7 +18,7 @@ create table profiles (
   protein_goal numeric not null default 150,
   carbs_goal numeric not null default 200,
   fat_goal numeric not null default 70,
-  accent_color text not null default 'pink'
+  accent_color text not null default 'orange'
     check (accent_color in ('blue1','blue2','pink','yellow','orange','green')),
   created_at timestamptz not null default now()
 );

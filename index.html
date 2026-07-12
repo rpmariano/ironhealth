@@ -15,7 +15,11 @@
   ::-webkit-scrollbar-thumb { background:#3f3f46; border-radius:9999px; }
   ::-webkit-scrollbar-track { background:transparent; }
 
-  .card { background:linear-gradient(180deg, rgba(24,24,27,0.9), rgba(15,15,17,0.9)); border:1px solid rgba(63,63,70,0.6); }
+  .card { background:linear-gradient(180deg, rgba(34,34,38,0.95), rgba(20,20,22,0.95)); border:1px solid rgba(82,82,91,0.7); filter:drop-shadow(0 2px 8px rgba(0,0,0,0.35)); }
+
+  html:not(.light) [class~="bg-neutral-900"],
+  html:not(.light) [class*="bg-neutral-900/"] { background-color:rgba(43,43,48,0.75) !important; }
+  html:not(.light) [class~="bg-neutral-800"] { background-color:rgba(63,63,70,0.65) !important; }
 
   .tab-btn.active { color:var(--accent); }
   .tab-btn.active .tab-dot { opacity:1; }
@@ -46,7 +50,7 @@
 
   /* ===== Tema claro ===== */
   html.light, html.light body { background:#f8fafc; color:#334155; }
-  html.light .card { background:#ffffff; border-color:#e2e8f0; }
+  html.light .card { background:#ffffff; border-color:#cbd5e1; filter:drop-shadow(0 2px 6px rgba(15,23,42,0.10)); }
   html.light .sticky.top-0 { background:rgba(248,250,252,0.92); }
   html.light #bottomNav > div { background:rgba(255,255,255,0.95); }
   html.light ::-webkit-scrollbar-thumb { background:#cbd5e1; }
@@ -54,13 +58,13 @@
   html.light [class~="bg-neutral-950"],
   html.light [class*="bg-neutral-950/"] { background-color:#f8fafc !important; }
   html.light [class~="bg-neutral-900"],
-  html.light [class*="bg-neutral-900/"] { background-color:#f1f5f9 !important; }
-  html.light [class~="bg-neutral-800"] { background-color:#f1f5f9 !important; }
+  html.light [class*="bg-neutral-900/"] { background-color:#eef1f6 !important; }
+  html.light [class~="bg-neutral-800"] { background-color:#eef1f6 !important; }
   html.light [class~="bg-neutral-700"] { background-color:#cbd5e1 !important; }
 
   html.light [class~="border-neutral-700"] { border-color:#cbd5e1 !important; }
-  html.light [class~="border-neutral-800"] { border-color:#e2e8f0 !important; }
-  html.light [class~="border-neutral-900"] { border-color:#e2e8f0 !important; }
+  html.light [class~="border-neutral-800"] { border-color:#d6dde5 !important; }
+  html.light [class~="border-neutral-900"] { border-color:#d6dde5 !important; }
 
   html.light [class~="text-white"] { color:#0f172a !important; }
   html.light [class~="text-slate-200"] { color:#1e293b !important; }
@@ -1370,7 +1374,7 @@ function renderMealCard(meal){
 
         <div class="grid grid-cols-4 gap-1.5 text-center">
           ${MACROS.map(m => `
-            <div class="bg-neutral-900/60 rounded-xl py-2">
+            <div class="bg-neutral-900/60 border border-neutral-800 rounded-xl py-2">
               <p class="text-[9px] text-slate-500">${m.label}</p>
               <p class="text-xs font-bold text-white">${n[m.key].toFixed(0)}<span class="text-[9px] font-normal text-slate-500">${m.unit==='kcal'?'':m.unit}</span></p>
             </div>

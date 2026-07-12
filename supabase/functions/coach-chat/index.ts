@@ -25,7 +25,10 @@ function jsonResponse(body: unknown, status = 200): Response {
 
 function buildSystemInstruction(
   coachContext: string | null,
+  biometrics: { height_cm: number | null; weight_kg: number | null; gender: string | null },
   nutritionSummary: string,
+  gymSummary: string | null,
+  runningSummary: string | null,
 ): string {
   const today = new Date().toLocaleDateString("pt-PT", {
     weekday: "long",
@@ -42,11 +45,26 @@ function buildSystemInstruction(
     `Não sejas excessivamente longo — responde de forma concisa mas completa.\n\n` +
     `Data atual: ${today}.`;
 
+  const bio: string[] = [];
+  if (biometrics.gender) bio.push(`Género: ${biometrics.gender === "F" ? "feminino" : "masculino"}`);
+  if (biometrics.height_cm) bio.push(`Altura: ${biometrics.height_cm} cm`);
+  if (biometrics.weight_kg) bio.push(`Peso: ${biometrics.weight_kg} kg`);
+  if (biometrics.height_cm && biometrics.weight_kg) {
+    const h = biometrics.height_cm / 100;
+    const bmi = biometrics.weight_kg / (h * h);
+    bio.push(`IMC: ${bmi.toFixed(1)}`);
+  }
+  if (bio.length) {
+    sys += `\n\nDados biométricos do utilizador:\n${bio.join("\n")}`;
+  }
+
   if (coachContext && coachContext.trim()) {
     sys += `\n\nPerfil e objetivos do utilizador (definido pelo próprio):\n${coachContext.trim()}`;
   }
 
   sys += `\n\n${nutritionSummary}`;
+  if (gymSummary) sys += `\n\n${gymSummary}`;
+  if (runningSummary) sys += `\n\n${runningSummary}`;
 
   return sys;
 }
@@ -78,10 +96,10 @@ Deno.serve(async (req) => {
       : "";
     if (!message) return jsonResponse({ error: "Mensagem vazia" }, 400);
 
-    // ── Perfil do utilizador (contexto + metas) ──────────────────────────
+    // ── Perfil do utilizador (contexto + metas + biometria) ──────────────
     const { data: profile } = await sb
       .from("profiles")
-      .select("coach_context, calorie_goal, protein_goal, carbs_goal, fat_goal")
+      .select("coach_context, calorie_goal, protein_goal, carbs_goal, fat_goal, height_cm, weight_kg, gender")
       .eq("id", userId)
       .maybeSingle();
 
@@ -133,9 +151,18 @@ Deno.serve(async (req) => {
     }
 
     // ── Construir pedido ao Gemini ───────────────────────────────────────
+    // gymSummary/runningSummary ficam null até essas verticais terem dados
+    // próprios (ainda são placeholders "Em breve" sem tabelas na BD).
     const systemInstruction = buildSystemInstruction(
       profile?.coach_context ?? null,
+      {
+        height_cm: (profile?.height_cm as number | null) ?? null,
+        weight_kg: (profile?.weight_kg as number | null) ?? null,
+        gender: (profile?.gender as string | null) ?? null,
+      },
       nutritionSummary,
+      null,
+      null,
     );
 
     // deno-lint-ignore no-explicit-any

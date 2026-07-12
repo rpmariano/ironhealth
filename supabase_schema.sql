@@ -23,6 +23,9 @@ create table profiles (
   theme text not null default 'dark'
     check (theme in ('dark','light')),
   coach_context text not null default '',
+  height_cm numeric,
+  weight_kg numeric,
+  gender text check (gender in ('F','M')),
   created_at timestamptz not null default now()
 );
 alter table profiles enable row level security;

@@ -620,12 +620,16 @@ async function submitNewItem(mealId){
 async function saveProfileFromForm(){
   const get = id => Number(document.getElementById(id).value);
   const name = document.getElementById('pfName').value.trim();
+  const gender = document.getElementById('pfGender').value;
   const updates = {
     display_name: name || state.profile.display_name,
     calorie_goal: get('pfCal') > 0 ? get('pfCal') : state.profile.calorie_goal,
     protein_goal: get('pfPro') > 0 ? get('pfPro') : state.profile.protein_goal,
     carbs_goal: get('pfCarb') > 0 ? get('pfCarb') : state.profile.carbs_goal,
     fat_goal: get('pfFat') > 0 ? get('pfFat') : state.profile.fat_goal,
+    height_cm: get('pfHeight') > 0 ? get('pfHeight') : null,
+    weight_kg: get('pfWeight') > 0 ? get('pfWeight') : null,
+    gender: gender || null,
   };
   Object.assign(state.profile, updates);
   render();
@@ -1671,6 +1675,27 @@ function renderPerfil(){
             <label class="text-[11px] text-slate-500">Nome</label>
             <input id="pfName" type="text" value="${esc(p.display_name||'')}"
               class="w-full bg-neutral-900 border border-neutral-800 rounded-xl px-3 py-2 text-sm text-white outline-none focus:border-[var(--accent)]/60" />
+          </div>
+          <div class="grid grid-cols-3 gap-2">
+            <div>
+              <label class="text-[11px] text-slate-500">Altura (cm)</label>
+              <input id="pfHeight" type="number" min="1" value="${p.height_cm||''}"
+                class="w-full bg-neutral-900 border border-neutral-800 rounded-xl px-3 py-2 text-sm text-white outline-none focus:border-[var(--accent)]/60" />
+            </div>
+            <div>
+              <label class="text-[11px] text-slate-500">Peso (kg)</label>
+              <input id="pfWeight" type="number" min="1" step="0.1" value="${p.weight_kg||''}"
+                class="w-full bg-neutral-900 border border-neutral-800 rounded-xl px-3 py-2 text-sm text-white outline-none focus:border-[var(--accent)]/60" />
+            </div>
+            <div>
+              <label class="text-[11px] text-slate-500">Género</label>
+              <select id="pfGender"
+                class="w-full bg-neutral-900 border border-neutral-800 rounded-xl px-2 py-2 text-sm text-white outline-none focus:border-[var(--accent)]/60">
+                <option value="" ${!p.gender?'selected':''}>–</option>
+                <option value="F" ${p.gender==='F'?'selected':''}>Fem</option>
+                <option value="M" ${p.gender==='M'?'selected':''}>Mas</option>
+              </select>
+            </div>
           </div>
           <div class="grid grid-cols-2 gap-2">
             <div>

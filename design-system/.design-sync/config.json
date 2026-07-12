@@ -1,0 +1,19 @@
+{
+  "projectId": "fc7118d1-40df-4b10-a242-1f3dd6c78205",
+  "pkg": "ironhealth-ui",
+  "globalName": "IronHealthUI",
+  "shape": "storybook",
+  "storybookConfigDir": ".storybook",
+  "readmeHeader": ".design-sync/conventions.md",
+  "buildCmd": "npm run build",
+  "titleMap": {
+    "Components/Badge": "Badge",
+    "Components/Button": "Button",
+    "Components/Card": "Card",
+    "Components/Chip": "Chip",
+    "Components/ColorSwatch": "ColorSwatch",
+    "Components/NavIconButton": "NavIconButton",
+    "Components/ProgressBar": "ProgressBar",
+    "Components/TabButton": "TabButton"
+  }
+}

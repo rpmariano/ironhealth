@@ -3,6 +3,16 @@
   "private": true,
   "version": "0.1.0",
   "type": "module",
+  "main": "./dist/ironhealth-ui.es.js",
+  "module": "./dist/ironhealth-ui.es.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/ironhealth-ui.es.js"
+    },
+    "./styles.css": "./dist/style.css"
+  },
   "scripts": {
     "build": "tsc -p tsconfig.json && vite build",
     "storybook": "storybook dev -p 6006",

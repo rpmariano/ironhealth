@@ -6,7 +6,9 @@
 
 import { createClient } from "jsr:@supabase/supabase-js@2";
 
-const GEMINI_MODEL = "gemini-2.0-flash";
+// Alias que segue sempre o modelo flash estável mais recente — evita 404s/429s
+// quando a Google descontinua uma versão fixa (mesmo alias usado em analyze-meal).
+const GEMINI_MODEL = "gemini-flash-latest";
 const MAX_HISTORY   = 30;   // mensagens mais recentes enviadas ao Gemini
 const MAX_MSG_LEN   = 2000; // caracteres máximos por mensagem
 

@@ -1823,6 +1823,8 @@ function renderMarkdown(md) {
   s = s.replace(/^### (.+)$/gm, '<p class="font-semibold text-white text-[11px] uppercase tracking-wide mt-3 mb-0.5">$1</p>');
   s = s.replace(/^## (.+)$/gm,  '<p class="font-bold text-white mt-3 mb-1">$1</p>');
   s = s.replace(/^# (.+)$/gm,   '<p class="font-bold text-white text-base mt-3 mb-1">$1</p>');
+  // Linha horizontal
+  s = s.replace(/^-{3,}$/gm, '<hr class="border-neutral-700 my-3" />');
   // Listas não ordenadas
   s = s.replace(/^[\-\*] (.+)$/gm, '<li>$1</li>');
   // Listas ordenadas

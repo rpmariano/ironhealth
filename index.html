@@ -46,7 +46,7 @@
 
   /* ===== Tema claro ===== */
   html.light, html.light body { background:#f8fafc; color:#334155; }
-  html.light .card { background:#ffffff; border-color:#e2e8f0; box-shadow:0 1px 3px rgba(15,23,42,0.06); }
+  html.light .card { background:#ffffff; border-color:#e2e8f0; }
   html.light .sticky.top-0 { background:rgba(248,250,252,0.92); }
   html.light #bottomNav > div { background:rgba(255,255,255,0.95); }
   html.light ::-webkit-scrollbar-thumb { background:#cbd5e1; }
@@ -78,6 +78,7 @@
   html.light .theme-flip-text { color:#0f172a !important; }
 
   html.light .vertical-btn .vertical-icon { background:#f1f5f9; border-color:#e2e8f0; color:#64748b; }
+  html.light .vertical-btn.active .vertical-icon { background:#f1f5f9; border:2px solid var(--accent); color:var(--accent); }
   html.light .accent-swatch.active { box-shadow:0 0 0 2px #f8fafc, 0 0 0 4px currentColor; }
   html.light .theme-swatch.active { border-color:var(--accent); background:color-mix(in srgb, var(--accent) 12%, transparent); }
 </style>
@@ -926,8 +927,11 @@ function viewInCalendar(dateIso){
 }
 
 function renderVerticalStrip(){
+  // Perfil é um atalho global, não pertence a nenhuma vertical — não deve
+  // fazer parecer que "Nutrição" (ou outra) está selecionada.
+  const noneActive = activeVertical === 'nutricao' && activeTab === 'perfil';
   return VERTICALS.map(v => `
-    <button onclick="switchVertical('${v.key}')" class="vertical-btn ${activeVertical===v.key?'active':''} flex flex-col items-center gap-1 shrink-0 w-14">
+    <button onclick="switchVertical('${v.key}')" class="vertical-btn ${(!noneActive && activeVertical===v.key)?'active':''} flex flex-col items-center gap-1 shrink-0 w-14">
       <span class="vertical-icon w-11 h-11 rounded-2xl flex items-center justify-center transition">
         <i data-lucide="${v.icon}" class="w-5 h-5"></i>
       </span>
@@ -983,11 +987,17 @@ function render(){
     return;
   }
 
-  nav.classList.remove('hidden');
-  const navHighlight = activeTab === 'registar' ? 'calendario' : activeTab; // Registar é acedido a partir do Calendário
-  document.querySelectorAll('.tab-btn').forEach(btn => {
-    btn.classList.toggle('active', btn.dataset.tab === navHighlight);
-  });
+  // Perfil é um atalho global (não um separador de Dashboard/Calendário) —
+  // o nav inferior da Nutrição não deve ficar visível enquanto lá estivermos.
+  if (activeTab === 'perfil') {
+    nav.classList.add('hidden');
+  } else {
+    nav.classList.remove('hidden');
+    const navHighlight = activeTab === 'registar' ? 'calendario' : activeTab; // Registar é acedido a partir do Calendário
+    document.querySelectorAll('.tab-btn').forEach(btn => {
+      btn.classList.toggle('active', btn.dataset.tab === navHighlight);
+    });
+  }
   if (activeTab === 'dashboard') main.innerHTML = renderDashboard();
   else if (activeTab === 'registar') main.innerHTML = renderRegistar();
   else if (activeTab === 'calendario') main.innerHTML = renderCalendario();

@@ -149,7 +149,7 @@
 
   <div id="fabRoot" class="hidden fixed right-4 z-30 flex flex-col-reverse items-end gap-2" style="bottom:20px;">
     <button id="fabMainBtn" onclick="toggleFab()" type="button"
-      class="w-14 h-14 rounded-full bg-[var(--accent)] text-neutral-950 shadow-lg flex items-center justify-center active:scale-95 transition-transform">
+      class="w-14 h-14 rounded-full bg-[var(--accent)] text-neutral-950 shadow-lg opacity-75 flex items-center justify-center active:scale-95 active:opacity-100 transition">
       <i data-lucide="plus" id="fabIcon" class="w-6 h-6 transition-transform"></i>
     </button>
     <div id="fabMenu" class="hidden flex-col items-end gap-2 mb-1">
@@ -1240,7 +1240,9 @@ function render(){
 
   if (activeVertical !== 'nutricao') {
     nav.classList.add('hidden');
-    fabRoot.style.bottom = '20px';
+    // No Coach o input/botão de enviar fica pregado ao fundo do ecrã, tal como
+    // o nav da Nutrição — usa a mesma folga para não ficar por cima.
+    fabRoot.style.bottom = (activeVertical === 'coach') ? '92px' : '20px';
     if (activeVertical === 'coach') {
       // Layout especial: o main torna-se um flex column sem scroll próprio
       // para que a lista de mensagens e o input partilhem a altura disponível.
@@ -1351,11 +1353,6 @@ function renderHome(){
           <i data-lucide="bot" class="w-20 h-20 absolute -right-2 -bottom-2 text-white/15"></i>
         </button>
       </div>
-
-      <button onclick="goToRegistarForDate(todayISO())"
-        class="w-full bg-[var(--accent)] text-neutral-950 font-bold text-sm rounded-2xl py-3 flex items-center justify-center gap-2 active:scale-[0.98] transition">
-        <i data-lucide="camera" class="w-4 h-4"></i> Registar Refeição
-      </button>
     </div>
   `;
 }

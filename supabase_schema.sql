@@ -229,3 +229,425 @@ create policy "body own folder update" on storage.objects for update
   using (bucket_id = 'body-photos' and (storage.foldername(name))[1] = auth.uid()::text);
 create policy "body own folder delete" on storage.objects for delete
   using (bucket_id = 'body-photos' and (storage.foldername(name))[1] = auth.uid()::text);
+
+-- ============================================================================
+-- ============ VERTICAL DE GINÁSIO ===========================================
+-- ============================================================================
+-- Biblioteca de exercícios (referência partilhada, legível por qualquer
+-- utilizador autenticado, sem escrita pelo cliente) + planos e registo de
+-- treino por utilizador (RLS "own rows", como a Nutrição).
+
+-- ---- referência: músculos (svg_key/body_region reservados p/ diagrama futuro) ----
+create table muscles (
+  id uuid primary key default gen_random_uuid(),
+  name text not null,
+  muscle_group text not null check (muscle_group in
+    ('peito','costas','ombros','biceps','triceps','quadriceps','isquiotibiais','gluteos','gemeos','core','antebracos','trapezio')),
+  body_region text check (body_region in ('frente','costas')),
+  svg_key text,
+  created_at timestamptz not null default now()
+);
+alter table muscles enable row level security;
+create policy "read all" on muscles for select using (true);
+
+-- ---- referência: exercícios ----
+create table exercises (
+  id uuid primary key default gen_random_uuid(),
+  name text not null,
+  muscle_group text not null check (muscle_group in
+    ('peito','costas','ombros','biceps','triceps','quadriceps','isquiotibiais','gluteos','gemeos','core','antebracos','trapezio')),
+  equipment text not null default 'outro' check (equipment in
+    ('barra','halteres','maquina','cabo','peso corporal','kettlebell','outro')),
+  mechanic text check (mechanic in ('composto','isolado')),
+  instructions text,
+  created_at timestamptz not null default now()
+);
+create index exercises_group_idx on exercises(muscle_group);
+alter table exercises enable row level security;
+create policy "read all" on exercises for select using (true);
+
+-- ---- referência: envolvimento muscular por exercício (percentagens) ----
+create table exercise_muscles (
+  id uuid primary key default gen_random_uuid(),
+  exercise_id uuid not null references exercises(id) on delete cascade,
+  muscle_id uuid not null references muscles(id) on delete cascade,
+  involvement_pct numeric not null check (involvement_pct >= 0 and involvement_pct <= 100),
+  role text not null default 'secundario' check (role in ('primario','secundario','estabilizador')),
+  created_at timestamptz not null default now()
+);
+create index exercise_muscles_exercise_idx on exercise_muscles(exercise_id);
+alter table exercise_muscles enable row level security;
+create policy "read all" on exercise_muscles for select using (true);
+
+-- ---- planos de treino do utilizador ----
+create table workout_plans (
+  id uuid primary key default gen_random_uuid(),
+  user_id uuid not null references auth.users(id) on delete cascade,
+  name text not null,
+  is_active boolean not null default true,
+  created_at timestamptz not null default now()
+);
+create index workout_plans_user_idx on workout_plans(user_id);
+alter table workout_plans enable row level security;
+create policy "own rows" on workout_plans for all
+  using (auth.uid() = user_id) with check (auth.uid() = user_id);
+create policy "admin read all" on workout_plans for select using (public.is_admin());
+
+-- ---- dias de um plano (ex: Push na 2ª feira) ----
+create table workout_plan_days (
+  id uuid primary key default gen_random_uuid(),
+  plan_id uuid not null references workout_plans(id) on delete cascade,
+  user_id uuid not null references auth.users(id) on delete cascade,
+  name text not null,
+  weekday int check (weekday between 0 and 6),
+  order_index int not null default 0,
+  created_at timestamptz not null default now()
+);
+create index workout_plan_days_plan_idx on workout_plan_days(plan_id);
+alter table workout_plan_days enable row level security;
+create policy "own rows" on workout_plan_days for all
+  using (auth.uid() = user_id) with check (auth.uid() = user_id);
+create policy "admin read all" on workout_plan_days for select using (public.is_admin());
+
+-- ---- exercícios de um dia do plano (com alvos) ----
+create table workout_plan_exercises (
+  id uuid primary key default gen_random_uuid(),
+  plan_day_id uuid not null references workout_plan_days(id) on delete cascade,
+  user_id uuid not null references auth.users(id) on delete cascade,
+  exercise_id uuid not null references exercises(id),
+  order_index int not null default 0,
+  target_sets int,
+  target_reps text,
+  target_weight numeric,
+  rest_seconds int,
+  created_at timestamptz not null default now()
+);
+create index workout_plan_exercises_day_idx on workout_plan_exercises(plan_day_id);
+alter table workout_plan_exercises enable row level security;
+create policy "own rows" on workout_plan_exercises for all
+  using (auth.uid() = user_id) with check (auth.uid() = user_id);
+create policy "admin read all" on workout_plan_exercises for select using (public.is_admin());
+
+-- ---- sessões de treino (o "log") ----
+create table workout_sessions (
+  id uuid primary key default gen_random_uuid(),
+  user_id uuid not null references auth.users(id) on delete cascade,
+  date date not null,
+  plan_day_id uuid references workout_plan_days(id) on delete set null,
+  name text not null default '',
+  status text not null default 'em-curso' check (status in ('em-curso','concluido')),
+  started_at timestamptz,
+  completed_at timestamptz,
+  notes text,
+  created_at timestamptz not null default now()
+);
+create index workout_sessions_user_date_idx on workout_sessions(user_id, date);
+alter table workout_sessions enable row level security;
+create policy "own rows" on workout_sessions for all
+  using (auth.uid() = user_id) with check (auth.uid() = user_id);
+create policy "admin read all" on workout_sessions for select using (public.is_admin());
+
+-- ---- sets registados numa sessão ----
+create table workout_session_sets (
+  id uuid primary key default gen_random_uuid(),
+  session_id uuid not null references workout_sessions(id) on delete cascade,
+  user_id uuid not null references auth.users(id) on delete cascade,
+  exercise_id uuid not null references exercises(id),
+  set_index int not null default 0,
+  reps int,
+  weight numeric,
+  done boolean not null default false,
+  created_at timestamptz not null default now()
+);
+create index workout_session_sets_session_idx on workout_session_sets(session_id);
+alter table workout_session_sets enable row level security;
+create policy "own rows" on workout_session_sets for all
+  using (auth.uid() = user_id) with check (auth.uid() = user_id);
+create policy "admin read all" on workout_session_sets for select using (public.is_admin());
+
+-- ---- SEED da biblioteca (músculos → exercícios → envolvimento) ----
+insert into muscles (name, muscle_group, body_region, svg_key) values
+  ('Peitoral maior',            'peito',         'frente',  'chest'),
+  ('Peitoral superior',         'peito',         'frente',  'chest_upper'),
+  ('Grande dorsal',             'costas',        'costas',  'lats'),
+  ('Trapézio',                  'trapezio',      'costas',  'traps'),
+  ('Rombóides',                 'costas',        'costas',  'rhomboids'),
+  ('Lombar',                    'costas',        'costas',  'lower_back'),
+  ('Deltóide anterior',         'ombros',        'frente',  'front_delts'),
+  ('Deltóide lateral',          'ombros',        'frente',  'side_delts'),
+  ('Deltóide posterior',        'ombros',        'costas',  'rear_delts'),
+  ('Bíceps braquial',           'biceps',        'frente',  'biceps'),
+  ('Tríceps braquial',          'triceps',       'costas',  'triceps'),
+  ('Antebraço',                 'antebracos',    'frente',  'forearms'),
+  ('Quadríceps',                'quadriceps',    'frente',  'quads'),
+  ('Isquiotibiais',             'isquiotibiais', 'costas',  'hamstrings'),
+  ('Glúteos',                   'gluteos',       'costas',  'glutes'),
+  ('Gémeos',                    'gemeos',        'costas',  'calves'),
+  ('Abdominais',                'core',          'frente',  'abs'),
+  ('Oblíquos',                  'core',          'frente',  'obliques');
+
+insert into exercises (name, muscle_group, equipment, mechanic) values
+  ('Supino reto com barra','peito','barra','composto'),
+  ('Supino inclinado com barra','peito','barra','composto'),
+  ('Supino reto com halteres','peito','halteres','composto'),
+  ('Supino inclinado com halteres','peito','halteres','composto'),
+  ('Crucifixo com halteres','peito','halteres','isolado'),
+  ('Crossover na polia','peito','cabo','isolado'),
+  ('Flexões','peito','peso corporal','composto'),
+  ('Peck deck','peito','maquina','isolado'),
+  ('Fundos para peito','peito','peso corporal','composto'),
+  ('Levantamento terra','costas','barra','composto'),
+  ('Puxada frontal','costas','cabo','composto'),
+  ('Remada curvada com barra','costas','barra','composto'),
+  ('Remada unilateral com halter','costas','halteres','composto'),
+  ('Barra fixa','costas','peso corporal','composto'),
+  ('Remada na máquina','costas','maquina','composto'),
+  ('Remada sentada na polia','costas','cabo','composto'),
+  ('Pullover com halter','costas','halteres','isolado'),
+  ('Hiperextensão lombar','costas','peso corporal','isolado'),
+  ('Desenvolvimento militar com barra','ombros','barra','composto'),
+  ('Desenvolvimento com halteres','ombros','halteres','composto'),
+  ('Elevação lateral','ombros','halteres','isolado'),
+  ('Elevação frontal','ombros','halteres','isolado'),
+  ('Crucifixo invertido','ombros','halteres','isolado'),
+  ('Encolhimento','trapezio','halteres','isolado'),
+  ('Face pull','ombros','cabo','isolado'),
+  ('Desenvolvimento Arnold','ombros','halteres','composto'),
+  ('Rosca direta com barra','biceps','barra','isolado'),
+  ('Rosca alternada com halteres','biceps','halteres','isolado'),
+  ('Rosca martelo','biceps','halteres','isolado'),
+  ('Rosca concentrada','biceps','halteres','isolado'),
+  ('Rosca Scott','biceps','barra','isolado'),
+  ('Rosca na polia','biceps','cabo','isolado'),
+  ('Tríceps na polia','triceps','cabo','isolado'),
+  ('Tríceps testa','triceps','barra','isolado'),
+  ('Tríceps francês','triceps','halteres','isolado'),
+  ('Fundos entre bancos','triceps','peso corporal','composto'),
+  ('Tríceps corda','triceps','cabo','isolado'),
+  ('Supino fechado','triceps','barra','composto'),
+  ('Agachamento com barra','quadriceps','barra','composto'),
+  ('Prensa de pernas','quadriceps','maquina','composto'),
+  ('Cadeira extensora','quadriceps','maquina','isolado'),
+  ('Afundo','quadriceps','halteres','composto'),
+  ('Agachamento frontal','quadriceps','barra','composto'),
+  ('Agachamento hack','quadriceps','maquina','composto'),
+  ('Agachamento búlgaro','quadriceps','halteres','composto'),
+  ('Cadeira flexora','isquiotibiais','maquina','isolado'),
+  ('Stiff','isquiotibiais','barra','composto'),
+  ('Elevação pélvica','gluteos','barra','composto'),
+  ('Good morning','isquiotibiais','barra','composto'),
+  ('Cadeira abdutora','gluteos','maquina','isolado'),
+  ('Elevação de gémeos em pé','gemeos','maquina','isolado'),
+  ('Elevação de gémeos sentado','gemeos','maquina','isolado'),
+  ('Elevação de gémeos na prensa','gemeos','maquina','isolado'),
+  ('Prancha','core','peso corporal','isolado'),
+  ('Abdominal crunch','core','peso corporal','isolado'),
+  ('Elevação de pernas','core','peso corporal','isolado'),
+  ('Rotação russa','core','peso corporal','isolado'),
+  ('Prancha lateral','core','peso corporal','isolado'),
+  ('Roda abdominal','core','outro','composto'),
+  ('Elevação de joelhos suspenso','core','peso corporal','isolado'),
+  ('Rosca de punho','antebracos','halteres','isolado'),
+  ('Rosca de punho invertida','antebracos','halteres','isolado'),
+  ('Remada alta','ombros','barra','composto'),
+  ('Puxada com pega neutra','costas','cabo','composto'),
+  ('Agachamento sumô','gluteos','barra','composto');
+
+-- Envolvimento muscular: primário + secundários por exercício (soma ~100%).
+-- Ligado por nome (exercícios e músculos têm nomes únicos no seed acima).
+insert into exercise_muscles (exercise_id, muscle_id, involvement_pct, role)
+select e.id, m.id, v.pct, v.role
+from (values
+  ('Supino reto com barra','Peitoral maior',60,'primario'),
+  ('Supino reto com barra','Deltóide anterior',15,'secundario'),
+  ('Supino reto com barra','Tríceps braquial',15,'secundario'),
+  ('Supino reto com barra','Peitoral superior',10,'secundario'),
+  ('Supino inclinado com barra','Peitoral superior',45,'primario'),
+  ('Supino inclinado com barra','Peitoral maior',25,'secundario'),
+  ('Supino inclinado com barra','Deltóide anterior',15,'secundario'),
+  ('Supino inclinado com barra','Tríceps braquial',15,'secundario'),
+  ('Supino reto com halteres','Peitoral maior',60,'primario'),
+  ('Supino reto com halteres','Deltóide anterior',15,'secundario'),
+  ('Supino reto com halteres','Tríceps braquial',15,'secundario'),
+  ('Supino reto com halteres','Peitoral superior',10,'secundario'),
+  ('Supino inclinado com halteres','Peitoral superior',45,'primario'),
+  ('Supino inclinado com halteres','Peitoral maior',25,'secundario'),
+  ('Supino inclinado com halteres','Deltóide anterior',15,'secundario'),
+  ('Supino inclinado com halteres','Tríceps braquial',15,'secundario'),
+  ('Crucifixo com halteres','Peitoral maior',75,'primario'),
+  ('Crucifixo com halteres','Deltóide anterior',15,'secundario'),
+  ('Crucifixo com halteres','Peitoral superior',10,'secundario'),
+  ('Crossover na polia','Peitoral maior',70,'primario'),
+  ('Crossover na polia','Peitoral superior',15,'secundario'),
+  ('Crossover na polia','Deltóide anterior',15,'secundario'),
+  ('Flexões','Peitoral maior',55,'primario'),
+  ('Flexões','Tríceps braquial',20,'secundario'),
+  ('Flexões','Deltóide anterior',15,'secundario'),
+  ('Flexões','Abdominais',10,'estabilizador'),
+  ('Peck deck','Peitoral maior',80,'primario'),
+  ('Peck deck','Deltóide anterior',20,'secundario'),
+  ('Fundos para peito','Peitoral maior',55,'primario'),
+  ('Fundos para peito','Tríceps braquial',30,'secundario'),
+  ('Fundos para peito','Deltóide anterior',15,'secundario'),
+  ('Levantamento terra','Lombar',25,'primario'),
+  ('Levantamento terra','Glúteos',20,'secundario'),
+  ('Levantamento terra','Isquiotibiais',20,'secundario'),
+  ('Levantamento terra','Trapézio',20,'secundario'),
+  ('Levantamento terra','Grande dorsal',15,'secundario'),
+  ('Puxada frontal','Grande dorsal',60,'primario'),
+  ('Puxada frontal','Bíceps braquial',20,'secundario'),
+  ('Puxada frontal','Rombóides',10,'secundario'),
+  ('Puxada frontal','Deltóide posterior',10,'secundario'),
+  ('Remada curvada com barra','Grande dorsal',45,'primario'),
+  ('Remada curvada com barra','Rombóides',15,'secundario'),
+  ('Remada curvada com barra','Trapézio',15,'secundario'),
+  ('Remada curvada com barra','Bíceps braquial',15,'secundario'),
+  ('Remada curvada com barra','Deltóide posterior',10,'secundario'),
+  ('Remada unilateral com halter','Grande dorsal',55,'primario'),
+  ('Remada unilateral com halter','Rombóides',15,'secundario'),
+  ('Remada unilateral com halter','Trapézio',15,'secundario'),
+  ('Remada unilateral com halter','Bíceps braquial',15,'secundario'),
+  ('Barra fixa','Grande dorsal',60,'primario'),
+  ('Barra fixa','Bíceps braquial',20,'secundario'),
+  ('Barra fixa','Rombóides',10,'secundario'),
+  ('Barra fixa','Deltóide posterior',10,'secundario'),
+  ('Remada na máquina','Grande dorsal',50,'primario'),
+  ('Remada na máquina','Rombóides',20,'secundario'),
+  ('Remada na máquina','Bíceps braquial',15,'secundario'),
+  ('Remada na máquina','Deltóide posterior',15,'secundario'),
+  ('Remada sentada na polia','Grande dorsal',50,'primario'),
+  ('Remada sentada na polia','Rombóides',20,'secundario'),
+  ('Remada sentada na polia','Bíceps braquial',15,'secundario'),
+  ('Remada sentada na polia','Trapézio',15,'secundario'),
+  ('Pullover com halter','Grande dorsal',65,'primario'),
+  ('Pullover com halter','Peitoral maior',20,'secundario'),
+  ('Pullover com halter','Tríceps braquial',15,'secundario'),
+  ('Hiperextensão lombar','Lombar',60,'primario'),
+  ('Hiperextensão lombar','Glúteos',25,'secundario'),
+  ('Hiperextensão lombar','Isquiotibiais',15,'secundario'),
+  ('Desenvolvimento militar com barra','Deltóide anterior',45,'primario'),
+  ('Desenvolvimento militar com barra','Deltóide lateral',20,'secundario'),
+  ('Desenvolvimento militar com barra','Tríceps braquial',20,'secundario'),
+  ('Desenvolvimento militar com barra','Trapézio',15,'secundario'),
+  ('Desenvolvimento com halteres','Deltóide anterior',45,'primario'),
+  ('Desenvolvimento com halteres','Deltóide lateral',25,'secundario'),
+  ('Desenvolvimento com halteres','Tríceps braquial',20,'secundario'),
+  ('Desenvolvimento com halteres','Trapézio',10,'secundario'),
+  ('Elevação lateral','Deltóide lateral',75,'primario'),
+  ('Elevação lateral','Deltóide anterior',15,'secundario'),
+  ('Elevação lateral','Trapézio',10,'secundario'),
+  ('Elevação frontal','Deltóide anterior',70,'primario'),
+  ('Elevação frontal','Deltóide lateral',20,'secundario'),
+  ('Elevação frontal','Peitoral superior',10,'secundario'),
+  ('Crucifixo invertido','Deltóide posterior',65,'primario'),
+  ('Crucifixo invertido','Rombóides',20,'secundario'),
+  ('Crucifixo invertido','Trapézio',15,'secundario'),
+  ('Encolhimento','Trapézio',85,'primario'),
+  ('Encolhimento','Deltóide lateral',15,'secundario'),
+  ('Face pull','Deltóide posterior',45,'primario'),
+  ('Face pull','Rombóides',30,'secundario'),
+  ('Face pull','Trapézio',25,'secundario'),
+  ('Desenvolvimento Arnold','Deltóide anterior',40,'primario'),
+  ('Desenvolvimento Arnold','Deltóide lateral',30,'secundario'),
+  ('Desenvolvimento Arnold','Tríceps braquial',20,'secundario'),
+  ('Desenvolvimento Arnold','Trapézio',10,'secundario'),
+  ('Rosca direta com barra','Bíceps braquial',80,'primario'),
+  ('Rosca direta com barra','Antebraço',20,'secundario'),
+  ('Rosca alternada com halteres','Bíceps braquial',75,'primario'),
+  ('Rosca alternada com halteres','Antebraço',25,'secundario'),
+  ('Rosca martelo','Bíceps braquial',60,'primario'),
+  ('Rosca martelo','Antebraço',40,'secundario'),
+  ('Rosca concentrada','Bíceps braquial',85,'primario'),
+  ('Rosca concentrada','Antebraço',15,'secundario'),
+  ('Rosca Scott','Bíceps braquial',85,'primario'),
+  ('Rosca Scott','Antebraço',15,'secundario'),
+  ('Rosca na polia','Bíceps braquial',80,'primario'),
+  ('Rosca na polia','Antebraço',20,'secundario'),
+  ('Tríceps na polia','Tríceps braquial',90,'primario'),
+  ('Tríceps na polia','Antebraço',10,'secundario'),
+  ('Tríceps testa','Tríceps braquial',90,'primario'),
+  ('Tríceps testa','Antebraço',10,'secundario'),
+  ('Tríceps francês','Tríceps braquial',85,'primario'),
+  ('Tríceps francês','Deltóide anterior',15,'secundario'),
+  ('Fundos entre bancos','Tríceps braquial',70,'primario'),
+  ('Fundos entre bancos','Deltóide anterior',15,'secundario'),
+  ('Fundos entre bancos','Peitoral maior',15,'secundario'),
+  ('Tríceps corda','Tríceps braquial',90,'primario'),
+  ('Tríceps corda','Antebraço',10,'secundario'),
+  ('Supino fechado','Tríceps braquial',55,'primario'),
+  ('Supino fechado','Peitoral maior',25,'secundario'),
+  ('Supino fechado','Deltóide anterior',20,'secundario'),
+  ('Agachamento com barra','Quadríceps',45,'primario'),
+  ('Agachamento com barra','Glúteos',25,'secundario'),
+  ('Agachamento com barra','Isquiotibiais',15,'secundario'),
+  ('Agachamento com barra','Lombar',15,'estabilizador'),
+  ('Prensa de pernas','Quadríceps',55,'primario'),
+  ('Prensa de pernas','Glúteos',25,'secundario'),
+  ('Prensa de pernas','Isquiotibiais',20,'secundario'),
+  ('Cadeira extensora','Quadríceps',95,'primario'),
+  ('Cadeira extensora','Gémeos',5,'secundario'),
+  ('Afundo','Quadríceps',40,'primario'),
+  ('Afundo','Glúteos',35,'secundario'),
+  ('Afundo','Isquiotibiais',25,'secundario'),
+  ('Agachamento frontal','Quadríceps',50,'primario'),
+  ('Agachamento frontal','Glúteos',25,'secundario'),
+  ('Agachamento frontal','Lombar',15,'estabilizador'),
+  ('Agachamento frontal','Abdominais',10,'estabilizador'),
+  ('Agachamento hack','Quadríceps',65,'primario'),
+  ('Agachamento hack','Glúteos',20,'secundario'),
+  ('Agachamento hack','Isquiotibiais',15,'secundario'),
+  ('Agachamento búlgaro','Quadríceps',40,'primario'),
+  ('Agachamento búlgaro','Glúteos',40,'secundario'),
+  ('Agachamento búlgaro','Isquiotibiais',20,'secundario'),
+  ('Cadeira flexora','Isquiotibiais',90,'primario'),
+  ('Cadeira flexora','Gémeos',10,'secundario'),
+  ('Stiff','Isquiotibiais',45,'primario'),
+  ('Stiff','Glúteos',35,'secundario'),
+  ('Stiff','Lombar',20,'estabilizador'),
+  ('Elevação pélvica','Glúteos',65,'primario'),
+  ('Elevação pélvica','Isquiotibiais',25,'secundario'),
+  ('Elevação pélvica','Quadríceps',10,'secundario'),
+  ('Good morning','Isquiotibiais',40,'primario'),
+  ('Good morning','Lombar',35,'secundario'),
+  ('Good morning','Glúteos',25,'secundario'),
+  ('Cadeira abdutora','Glúteos',90,'primario'),
+  ('Cadeira abdutora','Quadríceps',10,'secundario'),
+  ('Elevação de gémeos em pé','Gémeos',100,'primario'),
+  ('Elevação de gémeos sentado','Gémeos',100,'primario'),
+  ('Elevação de gémeos na prensa','Gémeos',100,'primario'),
+  ('Prancha','Abdominais',60,'primario'),
+  ('Prancha','Oblíquos',25,'secundario'),
+  ('Prancha','Lombar',15,'estabilizador'),
+  ('Abdominal crunch','Abdominais',85,'primario'),
+  ('Abdominal crunch','Oblíquos',15,'secundario'),
+  ('Elevação de pernas','Abdominais',70,'primario'),
+  ('Elevação de pernas','Oblíquos',20,'secundario'),
+  ('Elevação de pernas','Quadríceps',10,'secundario'),
+  ('Rotação russa','Oblíquos',65,'primario'),
+  ('Rotação russa','Abdominais',35,'secundario'),
+  ('Prancha lateral','Oblíquos',70,'primario'),
+  ('Prancha lateral','Abdominais',20,'secundario'),
+  ('Prancha lateral','Deltóide lateral',10,'estabilizador'),
+  ('Roda abdominal','Abdominais',65,'primario'),
+  ('Roda abdominal','Oblíquos',15,'secundario'),
+  ('Roda abdominal','Grande dorsal',10,'secundario'),
+  ('Roda abdominal','Lombar',10,'estabilizador'),
+  ('Elevação de joelhos suspenso','Abdominais',65,'primario'),
+  ('Elevação de joelhos suspenso','Oblíquos',20,'secundario'),
+  ('Elevação de joelhos suspenso','Antebraço',15,'estabilizador'),
+  ('Rosca de punho','Antebraço',100,'primario'),
+  ('Rosca de punho invertida','Antebraço',100,'primario'),
+  ('Remada alta','Deltóide lateral',40,'primario'),
+  ('Remada alta','Trapézio',30,'secundario'),
+  ('Remada alta','Bíceps braquial',15,'secundario'),
+  ('Remada alta','Deltóide anterior',15,'secundario'),
+  ('Puxada com pega neutra','Grande dorsal',55,'primario'),
+  ('Puxada com pega neutra','Bíceps braquial',20,'secundario'),
+  ('Puxada com pega neutra','Rombóides',15,'secundario'),
+  ('Puxada com pega neutra','Deltóide posterior',10,'secundario'),
+  ('Agachamento sumô','Glúteos',40,'primario'),
+  ('Agachamento sumô','Quadríceps',35,'secundario'),
+  ('Agachamento sumô','Isquiotibiais',25,'secundario')
+) as v(ex_name, mus_name, pct, role)
+join exercises e on e.name = v.ex_name
+join muscles m on m.name = v.mus_name;

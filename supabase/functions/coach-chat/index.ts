@@ -11,6 +11,53 @@ import { createClient } from "jsr:@supabase/supabase-js@2";
 const GEMINI_MODEL = "gemini-flash-latest";
 const MAX_HISTORY   = 30;   // mensagens mais recentes enviadas ao Gemini
 const MAX_MSG_LEN   = 2000; // caracteres máximos por mensagem
+const MAX_TOOL_ROUNDS = 4;  // idas-e-voltas de function calling antes de forçar resposta final
+
+// Ginásio em beta fechada — funcionalidades do Coach relacionadas com treino
+// (resumo + tool get_gym_history) só ficam ativas para esta conta enquanto a
+// vertical não é lançada a todos os utilizadores.
+const GYM_BETA_EMAIL = "rpmariano@gmail.com";
+
+const NUTRITION_TOOL = {
+  name: "get_nutrition_history",
+  description:
+    "Obtém o resumo nutricional diário (calorias, proteína, hidratos, gordura, nº refeições) " +
+    "do utilizador para um intervalo de datas específico. Usa esta função sempre que a pergunta " +
+    "envolva um período fora dos últimos 7 dias já fornecidos no contexto (ex: um mês passado, " +
+    "uma data concreta, \"desde o início do ano\").",
+  parameters: {
+    type: "OBJECT",
+    properties: {
+      start_date: { type: "STRING", description: "Data de início, formato YYYY-MM-DD" },
+      end_date: { type: "STRING", description: "Data de fim (inclusive), formato YYYY-MM-DD" },
+    },
+    required: ["start_date", "end_date"],
+  },
+};
+
+const GYM_TOOL = {
+  name: "get_gym_history",
+  description:
+    "Obtém os treinos de ginásio concluídos (data, nome do treino, volume total em kg, " +
+    "nº de séries) do utilizador para um intervalo de datas específico. Usa esta função " +
+    "sempre que a pergunta envolva treinos fora dos últimos 30 dias já fornecidos no contexto.",
+  parameters: {
+    type: "OBJECT",
+    properties: {
+      start_date: { type: "STRING", description: "Data de início, formato YYYY-MM-DD" },
+      end_date: { type: "STRING", description: "Data de fim (inclusive), formato YYYY-MM-DD" },
+    },
+    required: ["start_date", "end_date"],
+  },
+};
+
+// Ferramentas que o Gemini pode invocar quando a pergunta do utilizador sai
+// das janelas já incluídas no contexto (ex: "compara Maio com hoje"). A tool
+// de ginásio só é oferecida às contas com a beta fechada ativa.
+function buildTools(gymEnabled: boolean) {
+  const functionDeclarations = gymEnabled ? [NUTRITION_TOOL, GYM_TOOL] : [NUTRITION_TOOL];
+  return [{ functionDeclarations }];
+}
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -41,12 +88,173 @@ function jsonResponse(body: unknown, status = 200): Response {
   });
 }
 
+type DayTotals = { kcal: number; prot: number; carbs: number; fat: number; meals: number };
+
+// deno-lint-ignore no-explicit-any
+export function aggregateMealsByDate(meals: any[]): Record<string, DayTotals> {
+  const byDate: Record<string, DayTotals> = {};
+  for (const meal of meals) {
+    if (!byDate[meal.date]) byDate[meal.date] = { kcal: 0, prot: 0, carbs: 0, fat: 0, meals: 0 };
+    const d = byDate[meal.date];
+    d.meals += 1;
+    for (const it of (meal.meal_items || [])) {
+      const f = (it.quantity_grams || 0) / 100;
+      d.kcal  += (it.calories_per_100g || 0) * f;
+      d.prot  += (it.protein_per_100g  || 0) * f;
+      d.carbs += (it.carbs_per_100g    || 0) * f;
+      d.fat   += (it.fat_per_100g      || 0) * f;
+    }
+  }
+  return byDate;
+}
+
+const ISO_DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
+const MAX_RANGE_DAYS = 366;      // limite defensivo para não pedir intervalos absurdos
+const WEEKLY_BUCKET_THRESHOLD = 35; // acima disto, agrega por semana em vez de por dia
+
+// Executa a function call pedida pelo Gemini: vai buscar os dados nutricionais
+// do intervalo pedido e devolve um resumo textual compacto.
+// deno-lint-ignore no-explicit-any
+export async function runGetNutritionHistory(sb: any, userId: string, args: { start_date?: string; end_date?: string }): Promise<string> {
+  const { start_date, end_date } = args;
+  if (!start_date || !end_date || !ISO_DATE_RE.test(start_date) || !ISO_DATE_RE.test(end_date)) {
+    return "Erro: start_date e end_date têm de ser strings no formato YYYY-MM-DD.";
+  }
+  const start = new Date(start_date + "T00:00:00Z");
+  const end = new Date(end_date + "T00:00:00Z");
+  if (start > end) return "Erro: start_date é posterior a end_date.";
+  const rangeDays = Math.round((end.getTime() - start.getTime()) / 86400000) + 1;
+  if (rangeDays > MAX_RANGE_DAYS) return `Erro: intervalo demasiado longo (máximo ${MAX_RANGE_DAYS} dias).`;
+
+  const { data: meals, error } = await sb
+    .from("meals")
+    .select("date, meal_items(quantity_grams, calories_per_100g, protein_per_100g, carbs_per_100g, fat_per_100g)")
+    .eq("user_id", userId)
+    .gte("date", start_date)
+    .lte("date", end_date);
+
+  if (error) return `Erro ao consultar dados: ${error.message}`;
+
+  const byDate = aggregateMealsByDate(meals || []);
+  const daysWithData = Object.keys(byDate).length;
+  if (daysWithData === 0) {
+    return `Sem refeições registadas entre ${start_date} e ${end_date}.`;
+  }
+
+  if (rangeDays <= WEEKLY_BUCKET_THRESHOLD) {
+    const lines: string[] = [];
+    for (let i = 0; i < rangeDays; i++) {
+      const d = new Date(start);
+      d.setUTCDate(d.getUTCDate() + i);
+      const iso = d.toISOString().slice(0, 10);
+      const day = byDate[iso];
+      lines.push(
+        day
+          ? `- ${iso}: ${day.kcal.toFixed(0)} kcal, ${day.prot.toFixed(0)}g proteína, ${day.carbs.toFixed(0)}g hidratos, ${day.fat.toFixed(0)}g gordura (${day.meals} refeições)`
+          : `- ${iso}: sem refeições registadas`,
+      );
+    }
+    return `Resumo diário de ${start_date} a ${end_date}:\n${lines.join("\n")}`;
+  }
+
+  // Intervalo longo: agrega por semana para não inchar o prompt.
+  const weeks: { start: string; end: string; totals: DayTotals; days: number }[] = [];
+  let cursor = new Date(start);
+  while (cursor <= end) {
+    const weekStart = new Date(cursor);
+    const weekEnd = new Date(cursor);
+    weekEnd.setUTCDate(weekEnd.getUTCDate() + 6);
+    if (weekEnd > end) weekEnd.setTime(end.getTime());
+
+    const totals: DayTotals = { kcal: 0, prot: 0, carbs: 0, fat: 0, meals: 0 };
+    let days = 0;
+    const d = new Date(weekStart);
+    while (d <= weekEnd) {
+      const iso = d.toISOString().slice(0, 10);
+      const day = byDate[iso];
+      if (day) {
+        totals.kcal += day.kcal; totals.prot += day.prot;
+        totals.carbs += day.carbs; totals.fat += day.fat; totals.meals += day.meals;
+        days += 1;
+      }
+      d.setUTCDate(d.getUTCDate() + 1);
+    }
+    weeks.push({ start: weekStart.toISOString().slice(0, 10), end: weekEnd.toISOString().slice(0, 10), totals, days });
+    cursor.setUTCDate(cursor.getUTCDate() + 7);
+  }
+
+  const lines = weeks.map((w) => {
+    const n = Math.max(w.days, 1);
+    return `- ${w.start} a ${w.end} (média/dia com registo, ${w.days} dias registados): ` +
+      `${(w.totals.kcal / n).toFixed(0)} kcal, ${(w.totals.prot / n).toFixed(0)}g proteína, ` +
+      `${(w.totals.carbs / n).toFixed(0)}g hidratos, ${(w.totals.fat / n).toFixed(0)}g gordura`;
+  });
+  return `Resumo semanal (médias diárias) de ${start_date} a ${end_date}:\n${lines.join("\n")}`;
+}
+
+// ── Ginásio ────────────────────────────────────────────────────────────────
+// Resume sessões de treino em {data, nome, volume, séries}. Volume = Σ reps×carga
+// sobre séries com reps e carga preenchidos.
+// deno-lint-ignore no-explicit-any
+export function summariseSessions(sessions: any[]): { date: string; name: string; volume: number; sets: number }[] {
+  return sessions.map((s) => {
+    let volume = 0;
+    let sets = 0;
+    for (const st of (s.workout_session_sets || [])) {
+      if (st.reps != null && st.weight != null) { volume += st.reps * st.weight; sets += 1; }
+    }
+    return { date: s.date, name: s.name || "Treino", volume, sets };
+  });
+}
+
+// deno-lint-ignore no-explicit-any
+function buildGymSummary(sessions: any[], windowDays: number): string {
+  const rows = summariseSessions(sessions);
+  if (rows.length === 0) {
+    return `Treinos de ginásio (últimos ${windowDays} dias): sem treinos concluídos.`;
+  }
+  const lines = rows.map((r) =>
+    `- ${r.date}: ${r.name} — ${Math.round(r.volume)} kg de volume, ${r.sets} séries`,
+  );
+  return `Treinos de ginásio (últimos ${windowDays} dias, ${rows.length} concluído(s)):\n${lines.join("\n")}`;
+}
+
+// Executa a function call get_gym_history: treinos concluídos num intervalo.
+// deno-lint-ignore no-explicit-any
+export async function runGetGymHistory(sb: any, userId: string, args: { start_date?: string; end_date?: string }): Promise<string> {
+  const { start_date, end_date } = args;
+  if (!start_date || !end_date || !ISO_DATE_RE.test(start_date) || !ISO_DATE_RE.test(end_date)) {
+    return "Erro: start_date e end_date têm de ser strings no formato YYYY-MM-DD.";
+  }
+  const start = new Date(start_date + "T00:00:00Z");
+  const end = new Date(end_date + "T00:00:00Z");
+  if (start > end) return "Erro: start_date é posterior a end_date.";
+  const rangeDays = Math.round((end.getTime() - start.getTime()) / 86400000) + 1;
+  if (rangeDays > MAX_RANGE_DAYS) return `Erro: intervalo demasiado longo (máximo ${MAX_RANGE_DAYS} dias).`;
+
+  const { data, error } = await sb
+    .from("workout_sessions")
+    .select("date, name, status, workout_session_sets(reps, weight)")
+    .eq("user_id", userId)
+    .eq("status", "concluido")
+    .gte("date", start_date)
+    .lte("date", end_date)
+    .order("date", { ascending: true });
+
+  if (error) return `Erro ao consultar dados: ${error.message}`;
+  const rows = summariseSessions(data || []);
+  if (rows.length === 0) return `Sem treinos concluídos entre ${start_date} e ${end_date}.`;
+  const lines = rows.map((r) => `- ${r.date}: ${r.name} — ${Math.round(r.volume)} kg de volume, ${r.sets} séries`);
+  return `Treinos de ${start_date} a ${end_date} (${rows.length}):\n${lines.join("\n")}`;
+}
+
 function buildSystemInstruction(
   coachContext: string | null,
   biometrics: { height_cm: number | null; weight_kg: number | null; gender: string | null },
   nutritionSummary: string,
   gymSummary: string | null,
   runningSummary: string | null,
+  gymEnabled: boolean,
 ): string {
   const today = new Date().toLocaleDateString("pt-PT", {
     weekday: "long",
@@ -72,7 +280,17 @@ function buildSystemInstruction(
     `torna-se "Dá-me um plano de nutrição para hoje"). Não repitas no texto da resposta ` +
     `(campo "reply") o convite para essas perguntas — isso é só para o campo "suggestions". ` +
     `Se não fizer sentido nenhuma sugestão, deixa o array vazio.\n\n` +
-    `Data atual: ${today}.`;
+    `Data atual: ${today}.\n\n` +
+    (gymEnabled
+      ? `O contexto abaixo tem os dados de nutrição dos últimos 7 dias e os treinos de ginásio ` +
+        `dos últimos 30 dias. Se a pergunta do utilizador precisar de dados fora dessas janelas ` +
+        `(um mês específico, uma data no passado, "desde o início do ano", etc.), usa a função ` +
+        `get_nutrition_history (nutrição) ou get_gym_history (ginásio) com o intervalo de datas ` +
+        `necessário antes de responder.`
+      : `O contexto abaixo só tem os dados de nutrição dos últimos 7 dias. Se a pergunta do ` +
+        `utilizador precisar de dados de outro período (um mês específico, uma data no passado, ` +
+        `"desde o início do ano", etc.), usa a função get_nutrition_history com o intervalo de ` +
+        `datas necessário antes de responder.`);
 
   const bio: string[] = [];
   if (biometrics.gender) bio.push(`Género: ${biometrics.gender === "F" ? "feminino" : "masculino"}`);
@@ -98,7 +316,7 @@ function buildSystemInstruction(
   return sys;
 }
 
-Deno.serve(async (req) => {
+async function handler(req: Request): Promise<Response> {
   if (req.method === "OPTIONS") return new Response("ok", { headers: corsHeaders });
   if (req.method !== "POST") return jsonResponse({ error: "Método não suportado" }, 405);
 
@@ -118,6 +336,8 @@ Deno.serve(async (req) => {
     const { data: userData, error: userError } = await sb.auth.getUser();
     if (userError || !userData?.user) return jsonResponse({ error: "Sessão inválida" }, 401);
     const userId = userData.user.id;
+    // Ginásio em beta fechada — resumo, tool e menção no prompt só para esta conta.
+    const gymEnabled = userData.user.email === GYM_BETA_EMAIL;
 
     const body = await req.json();
     const message = typeof body.message === "string"
@@ -192,6 +412,25 @@ Deno.serve(async (req) => {
       `Histórico dos ${NUTRITION_WINDOW_DAYS - 1} dias anteriores (metas diárias: ${g.calorie_goal ?? "–"} kcal / ${g.protein_goal ?? "–"}g proteína / ${g.carbs_goal ?? "–"}g hidratos / ${g.fat_goal ?? "–"}g gordura):\n` +
       historyLines.join("\n");
 
+    // ── Treinos de ginásio dos últimos 30 dias (só beta fechada) ─────────
+    // Janela maior que a nutrição porque os treinos são menos frequentes.
+    let gymSummary: string | null = null;
+    if (gymEnabled) {
+      const GYM_WINDOW_DAYS = 30;
+      const gymStartD = new Date();
+      gymStartD.setUTCDate(gymStartD.getUTCDate() - (GYM_WINDOW_DAYS - 1));
+      const gymStartISO = gymStartD.toISOString().slice(0, 10);
+      const { data: gymSessions } = await sb
+        .from("workout_sessions")
+        .select("date, name, status, workout_session_sets(reps, weight)")
+        .eq("user_id", userId)
+        .eq("status", "concluido")
+        .gte("date", gymStartISO)
+        .lte("date", todayISO)
+        .order("date", { ascending: false });
+      gymSummary = buildGymSummary(gymSessions || [], GYM_WINDOW_DAYS);
+    }
+
     // ── Histórico de conversa (últimas MAX_HISTORY mensagens) ────────────
     const { data: history } = await sb
       .from("coach_messages")
@@ -211,8 +450,7 @@ Deno.serve(async (req) => {
     }
 
     // ── Construir pedido ao Gemini ───────────────────────────────────────
-    // gymSummary/runningSummary ficam null até essas verticais terem dados
-    // próprios (ainda são placeholders "Em breve" sem tabelas na BD).
+    // runningSummary fica null até a vertical Corrida ter dados próprios.
     const systemInstruction = buildSystemInstruction(
       profile?.coach_context ?? null,
       {
@@ -221,8 +459,9 @@ Deno.serve(async (req) => {
         gender: (profile?.gender as string | null) ?? null,
       },
       nutritionSummary,
+      gymSummary,
       null,
-      null,
+      gymEnabled,
     );
 
     // deno-lint-ignore no-explicit-any
@@ -234,38 +473,81 @@ Deno.serve(async (req) => {
       { role: "user", parts: [{ text: message }] },
     ];
 
-    const geminiRes = await fetch(
-      `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent?key=${geminiKey}`,
-      {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          system_instruction: { parts: [{ text: systemInstruction }] },
-          contents,
-          generationConfig: {
-            temperature: 0.7,
-            maxOutputTokens: 3000,
-            response_mime_type: "application/json",
-            response_schema: RESPONSE_SCHEMA,
-          },
-        }),
-      },
-    );
-
-    if (!geminiRes.ok) {
-      const errText = await geminiRes.text();
-      console.error("Gemini error:", geminiRes.status, errText);
-      if (geminiRes.status === 429) {
-        return jsonResponse({
-          error: "O coach atingiu o limite de pedidos da API neste momento. Tenta novamente dentro de alguns minutos.",
-        }, 503);
-      }
-      return jsonResponse({ error: `Falha na resposta do coach (${geminiRes.status}). Tenta novamente.` }, 502);
+    // ── Loop de function calling ──────────────────────────────────────────
+    // tools + response_schema coexistem: quando o modelo decide chamar uma
+    // função devolve uma parte functionCall (ignora o schema), quando decide
+    // responder ao utilizador segue o schema {reply, suggestions} como sempre.
+    async function callGemini() {
+      const res = await fetch(
+        `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent?key=${geminiKey}`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            system_instruction: { parts: [{ text: systemInstruction }] },
+            contents,
+            tools: buildTools(gymEnabled),
+            generationConfig: {
+              temperature: 0.7,
+              maxOutputTokens: 3000,
+              response_mime_type: "application/json",
+              response_schema: RESPONSE_SCHEMA,
+            },
+          }),
+        },
+      );
+      return res;
     }
 
-    const geminiJson = await geminiRes.json();
+    let geminiJson: Record<string, unknown> | undefined;
+    for (let round = 0; round <= MAX_TOOL_ROUNDS; round++) {
+      const isLastAllowedRound = round === MAX_TOOL_ROUNDS;
+      const geminiRes = await callGemini();
+
+      if (!geminiRes.ok) {
+        const errText = await geminiRes.text();
+        console.error("Gemini error:", geminiRes.status, errText);
+        if (geminiRes.status === 429) {
+          return jsonResponse({
+            error: "O coach atingiu o limite de pedidos da API neste momento. Tenta novamente dentro de alguns minutos.",
+          }, 503);
+        }
+        return jsonResponse({ error: `Falha na resposta do coach (${geminiRes.status}). Tenta novamente.` }, 502);
+      }
+
+      // deno-lint-ignore no-explicit-any
+      const parsedRes: any = await geminiRes.json();
+      // deno-lint-ignore no-explicit-any
+      const parts: any[] = parsedRes?.candidates?.[0]?.content?.parts || [];
+      // deno-lint-ignore no-explicit-any
+      const functionCalls = parts.filter((p) => p.functionCall);
+
+      if (functionCalls.length === 0 || isLastAllowedRound) {
+        geminiJson = parsedRes;
+        break;
+      }
+
+      // O modelo pediu dados — regista o turno e executa cada function call.
+      contents.push({ role: "model", parts });
+      const responseParts = [];
+      for (const p of functionCalls) {
+        const { name, args } = p.functionCall;
+        let result: string;
+        if (name === "get_nutrition_history") {
+          result = await runGetNutritionHistory(sb, userId, args || {});
+        } else if (name === "get_gym_history" && gymEnabled) {
+          result = await runGetGymHistory(sb, userId, args || {});
+        } else {
+          result = `Erro: função desconhecida "${name}".`;
+        }
+        responseParts.push({ functionResponse: { name, response: { result } } });
+      }
+      contents.push({ role: "function", parts: responseParts });
+    }
+
     const rawText: string | undefined =
-      geminiJson?.candidates?.[0]?.content?.parts?.[0]?.text;
+      // deno-lint-ignore no-explicit-any
+      (geminiJson as any)?.candidates?.[0]?.content?.parts?.[0]?.text;
 
     if (!rawText) {
       console.error("Gemini resposta vazia:", JSON.stringify(geminiJson));
@@ -307,4 +589,8 @@ Deno.serve(async (req) => {
     console.error("Erro inesperado:", e);
     return jsonResponse({ error: "Erro inesperado no servidor" }, 500);
   }
-});
+}
+
+if (import.meta.main) {
+  Deno.serve(handler);
+}

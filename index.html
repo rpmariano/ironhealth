@@ -294,6 +294,32 @@ let activeVertical = 'home'; // home | nutricao | ginasio | corrida | coach
 let activeTab = 'dashboard';
 let activeRange = 'hoje'; // hoje | semana | mes
 
+/* ===== Navegação / botão "voltar" (Android/PWA) =====
+   O browser/app só trata "back" como "sair" se não houver histórico para
+   percorrer. Cada mudança de ecrã (vertical/tab/admin) empurra uma entrada
+   no History API; popstate restaura o snapshot anterior em vez de fechar. */
+let suppressNavPush = false;
+function navSnapshot(){
+  return { activeVertical, activeTab, showAdminPanel };
+}
+function pushNavState(){
+  if (suppressNavPush) return;
+  history.pushState(navSnapshot(), '');
+}
+function applyNavSnapshot(s){
+  if (!s) return;
+  suppressNavPush = true;
+  activeVertical = s.activeVertical || 'home';
+  activeTab = s.activeTab || 'dashboard';
+  showAdminPanel = !!s.showAdminPanel;
+  closeFab();
+  render();
+  suppressNavPush = false;
+}
+window.addEventListener('popstate', (e) => {
+  applyNavSnapshot(e.state);
+});
+
 /* ===== Estado da vertical Ginásio ===== */
 let gymTab = 'biblioteca';        // biblioteca | planos | dashboard (treino é ecrã dedicado)
 let gymRef = { exercises: [] };   // biblioteca de referência partilhada (carregada 1x)
@@ -1087,6 +1113,7 @@ function switchVertical(vertical){
   }
   if (vertical === 'nutricao' && activeTab === 'calendario') ensureCalendarMonthLoaded(calendarViewMonth);
   render();
+  pushNavState();
 }
 
 function switchTab(tab){
@@ -1097,6 +1124,7 @@ function switchTab(tab){
   if (tab === 'registar') selectedMealType = suggestMealTypeByTime();
   if (tab === 'calendario') ensureCalendarMonthLoaded(calendarViewMonth);
   render();
+  pushNavState();
 }
 
 // Botão flutuante "+" — atalho global para criar um registo (refeição hoje;
@@ -1137,6 +1165,7 @@ function goToRegistarForDate(dateIso){
   abandonManualMealSession();
   selectedMealType = suggestMealTypeByTime();
   render();
+  pushNavState();
 }
 
 // Atalho global do cabeçalho — Perfil já não vive no submenu da Nutrição.
@@ -1147,6 +1176,7 @@ function goToPerfil(){
   analyzeSuccess = null;
   abandonManualMealSession();
   render();
+  pushNavState();
 }
 
 // Ícone do raio no cabeçalho: um clique vai sempre para o Início. Para o admin,
@@ -1168,12 +1198,14 @@ function openAdminPanel(){
   showAdminPanel = true;
   adminLoading = true;
   render();
+  pushNavState();
   loadAdminData();
 }
 
 function closeAdminPanel(){
   showAdminPanel = false;
   render();
+  pushNavState();
 }
 
 function setAdminTab(tab){
@@ -1235,6 +1267,7 @@ function viewInCalendar(dateIso){
   abandonManualMealSession();
   ensureCalendarMonthLoaded(calendarViewMonth);
   render();
+  pushNavState();
 }
 
 function renderVerticalStrip(){
@@ -3651,6 +3684,7 @@ function renderAdminLogs(){
 /* ============================= INIT ============================= */
 document.addEventListener('DOMContentLoaded', () => {
   render();
+  history.replaceState(navSnapshot(), '');
   sb.auth.onAuthStateChange(async (event, session) => {
     const newUser = session ? session.user : null;
     const wasLoggedIn = !!currentUser;
@@ -3671,6 +3705,7 @@ document.addEventListener('DOMContentLoaded', () => {
       adminSelectedUserId = null;
       applyTheme('dark');
       render();
+      history.replaceState(navSnapshot(), '');
     }
   });
 });

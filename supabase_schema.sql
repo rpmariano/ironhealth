@@ -181,6 +181,8 @@ create table if not exists body_assessments (
   status text not null default 'ready' check (status in ('pending','analyzing','ready','failed')),
   notes text,
   ai_summary text,
+  -- classificação Renpho por métrica: { "weight_kg": "Ligeiramente alto", ... }
+  classifications jsonb,
   -- métricas de composição corporal (Renpho) — todas opcionais
   weight_kg numeric,
   bmi numeric,
@@ -197,6 +199,8 @@ create table if not exists body_assessments (
   lean_body_mass_kg numeric,
   created_at timestamptz not null default now()
 );
+-- coluna adicionada mais tarde: garante que BDs já existentes a recebem.
+alter table body_assessments add column if not exists classifications jsonb;
 create index if not exists body_assessments_user_date_idx on body_assessments(user_id, date);
 alter table body_assessments enable row level security;
 

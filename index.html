@@ -1468,6 +1468,27 @@ function deltaClass(m, delta){
   return improving ? 'text-emerald-400' : 'text-red-400';
 }
 
+// Classes do badge para a etiqueta de estado que a Renpho mostra por métrica.
+// Verde = dentro do normal; âmbar = ligeiramente fora / atenção; vermelho =
+// muito fora. A cor sai das palavras da etiqueta (sem acentos), não da métrica.
+function classificationStyle(label){
+  const t = String(label).normalize('NFD').replace(/[\u0300-\u036f]/g,'').toLowerCase();
+  if (/(muito|obesid|obeso|perigos|critico|grave|severo)/.test(t))
+    return 'bg-red-500/15 text-red-400 border-red-500/40';
+  if (/(alto|baixo|elevado|acima|abaixo|insuficiente|sobrepeso|ligeir|magro|excesso|reduzid)/.test(t))
+    return 'bg-amber-500/15 text-amber-400 border-amber-500/40';
+  if (/(normal|media|medio|padr|saudav|otim|excelente|ideal|\bbom\b|\bboa\b|adequ)/.test(t))
+    return 'bg-emerald-500/10 text-emerald-400 border-emerald-500/30';
+  return 'bg-neutral-800 text-slate-400 border-neutral-700';
+}
+
+// Pequeno badge com a classificação Renpho (ou '' se não existir).
+function classificationBadge(assessment, key, extra){
+  const label = assessment && assessment.classifications ? assessment.classifications[key] : null;
+  if (!label) return '';
+  return `<span class="text-[9px] font-semibold px-1.5 py-0.5 rounded-full border shrink-0 ${classificationStyle(label)} ${extra || ''}">${esc(label)}</span>`;
+}
+
 function switchBodyTab(tab){
   bodyTab = tab;
   bodyError = null;
@@ -1763,8 +1784,12 @@ function renderAssessmentCard(a){
     }
     return `
       <div class="flex items-center justify-between gap-2 py-1.5 border-b border-neutral-900 last:border-0">
-        <span class="text-xs text-slate-400 flex items-center gap-1.5"><span class="w-2 h-2 rounded-full shrink-0" style="background:${m.color}"></span>${m.label}</span>
-        <div class="flex items-center gap-2">
+        <span class="text-xs text-slate-400 flex items-center gap-1.5 min-w-0">
+          <span class="w-2 h-2 rounded-full shrink-0" style="background:${m.color}"></span>
+          <span class="truncate">${m.label}</span>
+          ${classificationBadge(a, m.key)}
+        </span>
+        <div class="flex items-center gap-2 shrink-0">
           ${delta}
           <div class="flex items-center gap-1">
             <input type="number" step="${m.dec === 0 ? '1' : '0.1'}" min="0" value="${v ?? ''}"
@@ -1861,10 +1886,12 @@ function renderBodyEvolucao(){
   // Últimos valores de todas as métricas (leitura mais recente que tem cada uma).
   const latestGrid = BODY_METRICS.map(x => {
     const a = bodyAssessments.find(as => as[x.key] !== null && as[x.key] !== undefined);
+    const badge = a ? classificationBadge(a, x.key, 'mt-1 inline-block') : '';
     return `
       <div class="card rounded-xl p-3">
         <p class="text-[10px] text-slate-500 truncate">${x.label}</p>
         <p class="text-sm font-bold text-white mt-0.5">${a ? fmtMetric(x, a[x.key]) : '—'}</p>
+        ${badge}
       </div>`;
   }).join('');
 

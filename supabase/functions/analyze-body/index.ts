@@ -62,6 +62,14 @@ const RESPONSE_SCHEMA = {
         METRIC_FIELDS.map((f) => [f.key, { type: "NUMBER", nullable: true }]),
       ),
     },
+    // Etiqueta de estado que a Renpho mostra ao lado de cada métrica
+    // (ex.: "Média", "Alto", "Baixo", "Ligeiramente alto", "Excelente").
+    classifications: {
+      type: "OBJECT",
+      properties: Object.fromEntries(
+        METRIC_FIELDS.map((f) => [f.key, { type: "STRING", nullable: true }]),
+      ),
+    },
     summary: { type: "STRING" },
   },
   required: ["metrics", "summary"],
@@ -123,8 +131,11 @@ function buildPrompt(notes: string | null, history: unknown[]): string {
     "- Se uma métrica não aparecer em nenhuma imagem, devolve null nessa chave (não inventes).\n" +
     "- Várias métricas da Renpho mostram DOIS valores (ex.: \"56.70 kg, 70.3 %\"). Segue rigorosamente " +
     "a unidade indicada em cada chave acima (kg ou %).\n" +
-    "- IGNORA as etiquetas de estado ao lado dos valores (ex.: \"Média\", \"Alto\", \"Baixo\", " +
-    "\"Ligeiramente alto\", \"Excelente\") — não são valores.\n" +
+    "- Muitas métricas têm ao lado uma ETIQUETA DE ESTADO (ex.: \"Média\", \"Normal\", \"Alto\", " +
+    "\"Baixo\", \"Ligeiramente alto\", \"Excelente\", \"Padrão\"). Coloca essa etiqueta, tal e qual " +
+    "aparece na imagem, no objeto \"classifications\" sob a MESMA chave da métrica. Se uma métrica " +
+    "não tiver etiqueta visível, devolve null nessa chave de \"classifications\". A etiqueta NÃO é " +
+    "um valor numérico — nunca a metas em \"metrics\".\n" +
     "- No ecrã \"Comparativo\", cada cartão mostra o valor grande (atual) e por baixo uma variação " +
     "com sinal (ex.: \"−0.40\", \"+0.1\"). Extrai SEMPRE o valor grande atual, NUNCA a variação.\n" +
     "- No ecrã \"Tendências\" (gráfico), usa o valor mais recente/último ponto, não a meta nem os extremos.\n" +
@@ -153,7 +164,7 @@ async function analyzeWithGemini(
   notes: string | null,
   history: unknown[],
   geminiKey: string,
-): Promise<{ metrics: Record<string, number | null>; summary: string }> {
+): Promise<{ metrics: Record<string, number | null>; classifications: Record<string, string>; summary: string }> {
   const parts: unknown[] = [{ text: buildPrompt(notes, history) }];
   for (const b64 of images) {
     parts.push({ inline_data: { mime_type: mime, data: b64 } });
@@ -181,7 +192,7 @@ async function analyzeWithGemini(
 
   const geminiJson = await geminiRes.json();
   const rawText = geminiJson?.candidates?.[0]?.content?.parts?.[0]?.text;
-  let parsed: { metrics?: Record<string, unknown>; summary?: unknown };
+  let parsed: { metrics?: Record<string, unknown>; classifications?: Record<string, unknown>; summary?: unknown };
   try {
     parsed = JSON.parse(rawText);
   } catch {
@@ -203,8 +214,18 @@ async function analyzeWithGemini(
     );
   }
 
+  // Classificações: só guarda strings não vazias, e só para métricas com valor.
+  const rawClass = (parsed.classifications ?? {}) as Record<string, unknown>;
+  const classifications: Record<string, string> = {};
+  for (const f of METRIC_FIELDS) {
+    const label = rawClass[f.key];
+    if (metrics[f.key] !== null && typeof label === "string" && label.trim()) {
+      classifications[f.key] = label.trim().slice(0, 40);
+    }
+  }
+
   const summary = typeof parsed.summary === "string" ? parsed.summary.trim() : "";
-  return { metrics, summary };
+  return { metrics, classifications, summary };
 }
 
 Deno.serve(async (req) => {
@@ -289,7 +310,7 @@ Deno.serve(async (req) => {
 
       const { data: updated, error: updateError } = await sb
         .from("body_assessments")
-        .update({ ...result.metrics, ai_summary: result.summary, notes: rawNotes, status: "ready" })
+        .update({ ...result.metrics, classifications: result.classifications, ai_summary: result.summary, notes: rawNotes, status: "ready" })
         .eq("id", assessmentId)
         .select()
         .single();
@@ -366,6 +387,7 @@ Deno.serve(async (req) => {
         status: "ready",
         notes: rawNotes,
         ai_summary: result.summary,
+        classifications: result.classifications,
         ...result.metrics,
       })
       .select()

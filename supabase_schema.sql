@@ -167,6 +167,69 @@ alter table app_logs enable row level security;
 create policy "insert own logs" on app_logs for insert with check (auth.uid() = user_id);
 create policy "admin read all logs" on app_logs for select using (public.is_admin());
 
+-- ============ body_assessments: avaliação corporal a partir de prints Renpho ============
+-- Cada linha é uma avaliação (1+ prints da app Renpho Health) analisada pelo
+-- Gemini, que extrai as métricas de composição corporal e escreve um breve
+-- resumo com comparação ao histórico. Uma métrica por coluna (todas opcionais)
+-- para simplificar a leitura e os gráficos de evolução, à imagem da Nutrição.
+-- Idempotente: pode correr numa BD já existente sem apagar dados.
+create table if not exists body_assessments (
+  id uuid primary key default gen_random_uuid(),
+  user_id uuid not null references auth.users(id) on delete cascade,
+  date date not null,
+  photo_paths text[] not null default '{}',
+  status text not null default 'ready' check (status in ('pending','analyzing','ready','failed')),
+  notes text,
+  ai_summary text,
+  -- classificação Renpho por métrica: { "weight_kg": "Ligeiramente alto", ... }
+  classifications jsonb,
+  -- métricas de composição corporal (Renpho) — todas opcionais
+  weight_kg numeric,
+  bmi numeric,
+  body_fat_pct numeric,
+  skeletal_muscle_pct numeric,
+  muscle_mass_kg numeric,
+  body_water_pct numeric,
+  protein_pct numeric,
+  bone_mass_kg numeric,
+  bmr_kcal numeric,
+  visceral_fat numeric,
+  subcutaneous_fat_pct numeric,
+  metabolic_age numeric,
+  lean_body_mass_kg numeric,
+  created_at timestamptz not null default now()
+);
+-- coluna adicionada mais tarde: garante que BDs já existentes a recebem.
+alter table body_assessments add column if not exists classifications jsonb;
+create index if not exists body_assessments_user_date_idx on body_assessments(user_id, date);
+alter table body_assessments enable row level security;
+
+drop policy if exists "own rows" on body_assessments;
+create policy "own rows" on body_assessments for all
+  using (auth.uid() = user_id) with check (auth.uid() = user_id);
+
+drop policy if exists "admin read all" on body_assessments;
+create policy "admin read all" on body_assessments for select using (public.is_admin());
+
+-- ============ storage: bucket privado para os prints de avaliação corporal ============
+insert into storage.buckets (id, name, public)
+values ('body-photos', 'body-photos', false)
+on conflict (id) do nothing;
+
+drop policy if exists "body own folder select" on storage.objects;
+drop policy if exists "body own folder insert" on storage.objects;
+drop policy if exists "body own folder update" on storage.objects;
+drop policy if exists "body own folder delete" on storage.objects;
+
+create policy "body own folder select" on storage.objects for select
+  using (bucket_id = 'body-photos' and (storage.foldername(name))[1] = auth.uid()::text);
+create policy "body own folder insert" on storage.objects for insert
+  with check (bucket_id = 'body-photos' and (storage.foldername(name))[1] = auth.uid()::text);
+create policy "body own folder update" on storage.objects for update
+  using (bucket_id = 'body-photos' and (storage.foldername(name))[1] = auth.uid()::text);
+create policy "body own folder delete" on storage.objects for delete
+  using (bucket_id = 'body-photos' and (storage.foldername(name))[1] = auth.uid()::text);
+
 -- ============================================================================
 -- ============ VERTICAL DE GINÁSIO ===========================================
 -- ============================================================================

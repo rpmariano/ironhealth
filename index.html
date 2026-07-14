@@ -162,10 +162,11 @@
         <span class="w-7 h-7 rounded-full flex items-center justify-center text-white shrink-0" style="background:linear-gradient(135deg,#9a3412,#f97316);"><i data-lucide="footprints" class="w-3.5 h-3.5"></i></span>
         <span class="text-xs font-semibold text-slate-400 whitespace-nowrap">Nova corrida <span class="text-[9px] uppercase text-slate-500">· em breve</span></span>
       </div>
-      <div class="flex items-center gap-2 bg-neutral-900/60 border border-neutral-800 pl-2.5 pr-3.5 py-2 rounded-full opacity-50">
+      <button id="fabWorkoutBtn" onclick="fabStartWorkout()" type="button"
+        class="flex items-center gap-2 bg-neutral-900 border border-neutral-800 pl-2.5 pr-3.5 py-2 rounded-full shadow-lg active:scale-95 transition">
         <span class="w-7 h-7 rounded-full flex items-center justify-center text-white shrink-0" style="background:linear-gradient(135deg,#1e3a8a,#6366f1);"><i data-lucide="dumbbell" class="w-3.5 h-3.5"></i></span>
-        <span class="text-xs font-semibold text-slate-400 whitespace-nowrap">Sessão de treino <span class="text-[9px] uppercase text-slate-500">· em breve</span></span>
-      </div>
+        <span id="fabWorkoutLabel" class="text-xs font-semibold text-white whitespace-nowrap">Sessão de treino</span>
+      </button>
     </div>
   </div>
 
@@ -215,6 +216,30 @@ const MICROS = [
   { key:'potassium_mg', label:'Potássio', unit:'mg' },
 ];
 
+// Grupos musculares da vertical Ginásio (chaves iguais às do check da BD).
+const MUSCLE_GROUPS = [
+  { key:'peito', label:'Peito' },
+  { key:'costas', label:'Costas' },
+  { key:'ombros', label:'Ombros' },
+  { key:'biceps', label:'Bíceps' },
+  { key:'triceps', label:'Tríceps' },
+  { key:'quadriceps', label:'Quadríceps' },
+  { key:'isquiotibiais', label:'Isquiotibiais' },
+  { key:'gluteos', label:'Glúteos' },
+  { key:'gemeos', label:'Gémeos' },
+  { key:'core', label:'Core' },
+  { key:'antebracos', label:'Antebraços' },
+  { key:'trapezio', label:'Trapézio' },
+];
+function gymGroupLabel(key){ const g = MUSCLE_GROUPS.find(g => g.key === key); return g ? g.label : key; }
+
+// Dias da semana (valores 0-6, dentro do check da BD; 0=Domingo como no getDay()).
+// Exibidos com a semana a começar à 2ª feira.
+const WEEKDAYS = [
+  { v:1, label:'2ª' }, { v:2, label:'3ª' }, { v:3, label:'4ª' },
+  { v:4, label:'5ª' }, { v:5, label:'6ª' }, { v:6, label:'Sáb' }, { v:0, label:'Dom' },
+];
+
 // As "verticais" do IronHealth Coach — Nutrição está implementada; as restantes
 // são placeholders "Em breve" até serem desenhadas.
 const VERTICALS = [
@@ -243,6 +268,10 @@ const ACCENT_COLORS = [
 const ADMIN_EMAIL = 'rpmariano@gmail.com';
 function isAdmin(){ return !!currentUser && currentUser.email === ADMIN_EMAIL; }
 
+// Vertical de Ginásio em beta fechada — só visível/utilizável para ADMIN_EMAIL
+// enquanto a funcionalidade não é lançada a todos os utilizadores.
+function isGymEnabled(){ return !!currentUser && currentUser.email === ADMIN_EMAIL; }
+
 let lastLogoClickAt = 0;
 let showAdminPanel = false;
 let adminTab = 'overview'; // overview | users | metrics | logs
@@ -264,6 +293,30 @@ let syncError = null;
 let activeVertical = 'home'; // home | nutricao | ginasio | corrida | coach
 let activeTab = 'dashboard';
 let activeRange = 'hoje'; // hoje | semana | mes
+
+/* ===== Estado da vertical Ginásio ===== */
+let gymTab = 'biblioteca';        // biblioteca | planos | dashboard (treino é ecrã dedicado)
+let gymRef = { exercises: [] };   // biblioteca de referência partilhada (carregada 1x)
+let gymMuscleFilter = 'todos';    // filtro por grupo muscular na biblioteca
+let expandedExerciseId = null;    // exercício expandido na biblioteca
+let gymPlans = [];                // planos do utilizador (dias + exercícios)
+let activeSession = null;         // sessão de treino em curso — fase 3
+// Sub-navegação do separador Planos
+let gymPlanView = 'list';         // list | detail | picker
+let activePlanId = null;          // plano aberto no detalhe
+let pickerDayId = null;           // dia ao qual o picker vai adicionar exercício
+let pickerFilter = 'todos';       // filtro por grupo no picker de exercícios
+let gymNewPlanOpen = false;       // form inline de novo plano
+let gymNewDayOpen = false;        // form inline de novo dia
+let newDayWeekday = null;         // dia da semana selecionado no form de novo dia
+// Sessão de treino (fase 3)
+let gymScreen = null;             // null | 'treino' | 'stats' (ecrãs focados sobre a vertical)
+let gymSessions = [];             // sessões carregadas (resumo/dashboard)
+let lastStats = null;             // estatísticas da sessão acabada de terminar
+// Dashboard de evolução (fase 4)
+let gymRange = 'mes';             // semana | mes | trimestre
+let gymChartExercise = null;      // exercício selecionado para a progressão
+let gymCharts = { vol: null, ex: null }; // instâncias Chart.js (destruídas antes de recriar)
 
 let coachMessages = []; // { id, role, content, created_at }
 let coachLoading  = false;
@@ -480,6 +533,28 @@ async function loadAllData(){
       .eq('user_id', userId)
       .order('created_at', { ascending: true });
     coachMessages = cMsgs || [];
+
+    // Ginásio em beta fechada — só carrega dados para quem tem acesso, para
+    // não gastar queries à toa nas contas que ainda não veem a vertical.
+    if (isGymEnabled()) {
+      // Biblioteca de exercícios (referência partilhada, legível por qualquer
+      // utilizador). Carregada uma vez com o envolvimento muscular embebido.
+      const { data: exs } = await sb.from('exercises')
+        .select('*, exercise_muscles(involvement_pct, role, muscles(name, muscle_group, body_region, svg_key))')
+        .order('name');
+      gymRef.exercises = exs || [];
+
+      // Planos de treino do utilizador (dias + exercícios embebidos). Os nomes
+      // dos exercícios resolvem-se por gymExerciseById() a partir da biblioteca.
+      const { data: plans } = await sb.from('workout_plans')
+        .select('*, workout_plan_days(*, workout_plan_exercises(*))')
+        .eq('user_id', userId)
+        .order('created_at', { ascending: true });
+      gymPlans = plans || [];
+
+      // Sessões de treino (janela alargada para cobrir os períodos do dashboard).
+      await loadGymSessions();
+    }
 
     syncError = null;
   } catch(e) {
@@ -1166,7 +1241,9 @@ function renderVerticalStrip(){
   // Perfil é um atalho global, não pertence a nenhuma vertical — não deve
   // fazer parecer que "Nutrição" (ou outra) está selecionada.
   const noneActive = activeVertical === 'nutricao' && activeTab === 'perfil';
-  return VERTICALS.map(v => `
+  // Ginásio em beta fechada — escondido da strip para todos exceto ADMIN_EMAIL.
+  const verticals = isGymEnabled() ? VERTICALS : VERTICALS.filter(v => v.key !== 'ginasio');
+  return verticals.map(v => `
     <button onclick="switchVertical('${v.key}')" class="vertical-btn ${(!noneActive && activeVertical===v.key)?'active':''} flex flex-col items-center gap-1 shrink-0 w-14">
       <span class="vertical-icon w-11 h-11 rounded-2xl flex items-center justify-center transition">
         <i data-lucide="${v.icon}" class="w-5 h-5"></i>
@@ -1214,6 +1291,7 @@ function render(){
 
   verticalStrip.classList.remove('hidden');
   verticalStrip.innerHTML = renderVerticalStrip();
+  updateFabWorkoutButtonUI();
 
   const showPerfilShortcut = !(activeVertical === 'nutricao' && activeTab === 'perfil');
   headerActions.innerHTML = `
@@ -1238,12 +1316,16 @@ function render(){
 
   fabRoot.classList.remove('hidden');
 
+  // Ginásio em beta fechada — se por algum motivo o estado apontar para lá
+  // sem a conta ter acesso (ex: estado antigo em memória), volta ao Início.
+  if (activeVertical === 'ginasio' && !isGymEnabled()) activeVertical = 'home';
+
   if (activeVertical !== 'nutricao') {
-    nav.classList.add('hidden');
-    // No Coach o input/botão de enviar fica pregado ao fundo do ecrã, tal como
-    // o nav da Nutrição — usa a mesma folga para não ficar por cima.
-    fabRoot.style.bottom = (activeVertical === 'coach') ? '92px' : '20px';
     if (activeVertical === 'coach') {
+      nav.classList.add('hidden');
+      // No Coach o input/botão de enviar fica pregado ao fundo do ecrã, tal como
+      // o nav da Nutrição — usa a mesma folga para não ficar por cima.
+      fabRoot.style.bottom = '92px';
       // Layout especial: o main torna-se um flex column sem scroll próprio
       // para que a lista de mensagens e o input partilhem a altura disponível.
       main.classList.remove('overflow-y-auto', 'pb-28');
@@ -1251,15 +1333,43 @@ function render(){
       main.innerHTML = renderCoach();
       if (window.lucide) lucide.createIcons();
       scrollCoachToBottom();
-    } else {
+      return;
+    }
+    if (activeVertical === 'ginasio') {
       main.classList.remove('overflow-hidden', 'pb-4', 'flex', 'flex-col');
       main.classList.add('overflow-y-auto', 'pb-28');
-      if (activeVertical === 'home') main.innerHTML = renderHome();
-      else main.innerHTML = renderVerticalPlaceholder(VERTICALS.find(v => v.key === activeVertical));
+      if (gymScreen === 'treino' || gymScreen === 'stats') {
+        // Ecrã focado (sessão a decorrer / estatísticas finais): esconde nav e FAB.
+        nav.classList.add('hidden');
+        fabRoot.classList.add('hidden');
+        main.innerHTML = gymScreen === 'treino' ? renderTreino() : renderStats();
+      } else {
+        // Nav próprio do Ginásio (Biblioteca / Planos / Evolução) injetado no
+        // mesmo #bottomNav — restaurado para Nutrição quando se volta lá.
+        nav.classList.remove('hidden');
+        nav.innerHTML = renderGymNav();
+        fabRoot.classList.remove('hidden');
+        fabRoot.style.bottom = '92px';
+        main.innerHTML = renderGinasio();
+      }
       if (window.lucide) lucide.createIcons();
+      if (!gymScreen && gymTab === 'dashboard') requestAnimationFrame(renderGymCharts);
+      return;
     }
+    // Início / Corrida → placeholder simples, sem nav.
+    nav.classList.add('hidden');
+    fabRoot.style.bottom = '20px';
+    main.classList.remove('overflow-hidden', 'pb-4', 'flex', 'flex-col');
+    main.classList.add('overflow-y-auto', 'pb-28');
+    if (activeVertical === 'home') main.innerHTML = renderHome();
+    else main.innerHTML = renderVerticalPlaceholder(VERTICALS.find(v => v.key === activeVertical));
+    if (window.lucide) lucide.createIcons();
     return;
   }
+
+  // A partir daqui é Nutrição: restaurar o nav próprio (o Ginásio pode tê-lo
+  // substituído) antes de aplicar o realce do separador ativo.
+  nav.innerHTML = NUTRITION_NAV_HTML;
 
   // Restaurar layout normal ao entrar na vertical Nutrição (caso venha do Coach)
   main.classList.remove('overflow-hidden', 'pb-4', 'flex', 'flex-col');
@@ -1322,12 +1432,12 @@ function renderHome(){
           </div>
           <i data-lucide="utensils" class="w-20 h-20 absolute -right-2 -bottom-2 text-white/15"></i>
         </button>
-        <button onclick="switchVertical('ginasio')" class="rounded-2xl p-4 text-left relative overflow-hidden min-h-[132px]" style="background:linear-gradient(135deg, #1e3a8a, #6366f1);">
+        <button onclick="${isGymEnabled() ? `switchVertical('ginasio')` : ''}" class="rounded-2xl p-4 text-left relative overflow-hidden min-h-[132px] ${isGymEnabled() ? '' : 'cursor-default'}" style="background:linear-gradient(135deg, #1e3a8a, #6366f1);">
           <div class="relative z-10 h-full flex flex-col justify-between">
             <i data-lucide="dumbbell" class="w-6 h-6 text-white/90"></i>
             <div>
               <p class="text-xs font-semibold text-white">Ginásio</p>
-              <p class="text-[11px] text-white/80 mt-0.5">Em breve</p>
+              <p class="text-[11px] text-white/80 mt-0.5">${isGymEnabled() ? `${(gymRef.exercises||[]).length} exercícios` : 'Em breve'}</p>
             </div>
           </div>
           <i data-lucide="dumbbell" class="w-20 h-20 absolute -right-2 -bottom-2 text-white/15"></i>
@@ -1371,6 +1481,1075 @@ function renderVerticalPlaceholder(v){
       </button>
     </div>
   `;
+}
+
+/* ============================= GINÁSIO ============================= */
+// Nav inferior da Nutrição (Dashboard/Calendário). Guardado como constante
+// porque o Ginásio injeta o seu próprio nav no mesmo #bottomNav e é preciso
+// restaurar este ao voltar à Nutrição.
+const NUTRITION_NAV_HTML = `
+    <div class="max-w-md mx-auto bg-neutral-900/95 backdrop-blur border-t border-neutral-800 grid grid-cols-2">
+      <button onclick="switchTab('dashboard')" data-tab="dashboard" class="tab-btn flex flex-col items-center gap-1 py-2.5 text-slate-500 text-[11px] font-medium">
+        <i data-lucide="layout-dashboard" class="w-5 h-5"></i>Dashboard
+        <span class="tab-dot w-1 h-1 rounded-full bg-[var(--accent)] opacity-0"></span>
+      </button>
+      <button onclick="switchTab('calendario')" data-tab="calendario" class="tab-btn flex flex-col items-center gap-1 py-2.5 text-slate-500 text-[11px] font-medium">
+        <i data-lucide="calendar-days" class="w-5 h-5"></i>Calendário
+        <span class="tab-dot w-1 h-1 rounded-full bg-[var(--accent)] opacity-0"></span>
+      </button>
+    </div>`;
+
+const GYM_TABS = [
+  { key:'biblioteca', label:'Biblioteca', icon:'dumbbell' },
+  { key:'planos', label:'Planos', icon:'clipboard-list' },
+  { key:'dashboard', label:'Evolução', icon:'trending-up' },
+];
+function renderGymNav(){
+  return `
+    <div class="max-w-md mx-auto bg-neutral-900/95 backdrop-blur border-t border-neutral-800 grid grid-cols-3">
+      ${GYM_TABS.map(t => `
+        <button onclick="switchGymTab('${t.key}')" class="tab-btn ${gymTab===t.key?'active':''} flex flex-col items-center gap-1 py-2.5 text-slate-500 text-[11px] font-medium">
+          <i data-lucide="${t.icon}" class="w-5 h-5"></i>${t.label}
+          <span class="tab-dot w-1 h-1 rounded-full bg-[var(--accent)] opacity-0"></span>
+        </button>`).join('')}
+    </div>`;
+}
+function switchGymTab(tab){ gymTab = tab; render(); }
+
+// Despacho dos separadores do Ginásio. Planos/Evolução chegam nas fases seguintes.
+function renderGinasio(){
+  if (gymTab === 'biblioteca') return renderBiblioteca();
+  if (gymTab === 'planos')     return renderPlanos();
+  if (gymTab === 'dashboard')  return renderGymDashboard();
+  return renderBiblioteca();
+}
+
+/* ---------- Biblioteca de exercícios ---------- */
+function setGymFilter(key){ gymMuscleFilter = key; expandedExerciseId = null; render(); }
+function toggleExercise(id){ expandedExerciseId = expandedExerciseId === id ? null : id; render(); }
+
+function renderBiblioteca(){
+  const exercises = gymRef.exercises || [];
+  const filtered = gymMuscleFilter === 'todos'
+    ? exercises
+    : exercises.filter(e => e.muscle_group === gymMuscleFilter);
+  const chips = [{ key:'todos', label:'Todos' }, ...MUSCLE_GROUPS];
+
+  return `
+    <div class="space-y-4 fade-in">
+      <div class="flex items-center gap-2">
+        <div class="w-9 h-9 rounded-xl flex items-center justify-center shrink-0" style="background:linear-gradient(135deg,#1e3a8a,#6366f1);">
+          <i data-lucide="dumbbell" class="w-5 h-5 text-white"></i>
+        </div>
+        <div>
+          <h2 class="text-sm font-bold text-white leading-none">Biblioteca</h2>
+          <p class="text-[11px] text-slate-500 mt-1">${exercises.length} exercícios${gymMuscleFilter!=='todos' ? ` · ${filtered.length} em ${gymGroupLabel(gymMuscleFilter)}` : ''}</p>
+        </div>
+      </div>
+
+      <div class="flex gap-2 overflow-x-auto no-scrollbar -mx-1 px-1">
+        ${chips.map(c => `
+          <button onclick="setGymFilter('${c.key}')"
+            class="range-chip ${gymMuscleFilter===c.key?'active':''} shrink-0 border border-neutral-700 rounded-full py-1.5 px-3 text-[11px] font-semibold text-slate-300 transition">
+            ${c.label}
+          </button>`).join('')}
+      </div>
+
+      <div class="space-y-2.5">
+        ${filtered.map(renderExerciseCard).join('') || `<p class="text-xs text-slate-500 text-center py-10">Nenhum exercício neste grupo.</p>`}
+      </div>
+    </div>`;
+}
+
+// Mapa svg_key -> intensidade (0-100) a partir do envolvimento do exercício.
+function exerciseMuscleMap(e){
+  const map = {};
+  (e.exercise_muscles || []).forEach(m => {
+    const key = m.muscles && m.muscles.svg_key;
+    if (!key) return;
+    map[key] = Math.max(map[key] || 0, m.involvement_pct);
+  });
+  return map;
+}
+
+// Agrega o envolvimento muscular de todos os exercícios de um dia de plano,
+// normalizado a 0-100 (para a miniatura do cartão de treino).
+function planDayMuscleMap(day){
+  const agg = {};
+  dayExercises(day).forEach(pe => {
+    const ex = gymExerciseById(pe.exercise_id);
+    (ex?.exercise_muscles || []).forEach(m => {
+      const k = m.muscles && m.muscles.svg_key;
+      if (!k) return;
+      agg[k] = (agg[k] || 0) + m.involvement_pct;
+    });
+  });
+  const max = Math.max(1, ...Object.values(agg));
+  const norm = {};
+  Object.keys(agg).forEach(k => { norm[k] = Math.round(agg[k] / max * 100); });
+  return norm;
+}
+
+// Boneco 3D estilizado (frente + costas) — design fornecido pelo utilizador
+// (ironhealth_muscle_map_v2.html), transcrito fielmente: mesma geometria e
+// esquema de cor (ACTIVE laranja-terracota / INACTIVE cinza), dirigido pelos
+// dados reais da BD (map = { svg_key: percentagem }) em vez de dados fixos.
+// opts.compact => recorta só a vista (frente/costas) com maior envolvimento.
+const MUSCLE_ACTIVE = '#D85A30';
+const MUSCLE_INACTIVE = '#9D9C95';
+const MUSCLE_INACTIVE_OPACITY = 0.28;
+
+function muscleDiagramSVG(map, opts){
+  opts = opts || {};
+  const gid = 'g' + Math.random().toString(36).slice(2, 8); // prefixo único (evita colisão de ids entre diagramas)
+
+  // Atributos de um músculo: ACTIVE com opacidade proporcional ao envolvimento,
+  // ou INACTIVE a opacidade fixa baixa — exatamente a lógica do ficheiro original.
+  function M(key){
+    const p = map[key] || 0;
+    const base = 'stroke="#fff" stroke-width="1" stroke-opacity="0.5"';
+    if (p > 0) return `fill="${MUSCLE_ACTIVE}" fill-opacity="${(0.35 + (p/100)*0.6).toFixed(3)}" ${base}`;
+    return `fill="${MUSCLE_INACTIVE}" fill-opacity="${MUSCLE_INACTIVE_OPACITY}" ${base}`;
+  }
+
+  const defs = `
+    <radialGradient id="${gid}headGrad" cx="0.38" cy="0.32" r="0.85">
+      <stop offset="0%" stop-color="#FDFDFC"/><stop offset="70%" stop-color="#E4E3DE"/><stop offset="100%" stop-color="#C2C1BB"/>
+    </radialGradient>
+    <linearGradient id="${gid}bodyGrad" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0%" stop-color="#CFCEC8"/><stop offset="35%" stop-color="#F0EFEC"/><stop offset="65%" stop-color="#EBEAE6"/><stop offset="100%" stop-color="#C6C5BF"/>
+    </linearGradient>
+    <linearGradient id="${gid}limbGrad" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0%" stop-color="#C9C8C2"/><stop offset="45%" stop-color="#EDECE8"/><stop offset="100%" stop-color="#CBCAC4"/>
+    </linearGradient>`;
+
+  const frontBody = `
+    <ellipse cx="180" cy="438" rx="95" ry="12" fill="#000" opacity="0.06"/>
+    <g transform="rotate(18 109 140)">
+      <rect x="92" y="122" width="36" height="128" rx="18" fill="url(#${gid}limbGrad)"/>
+      <circle cx="110" cy="248" r="15" fill="url(#${gid}limbGrad)"/>
+    </g>
+    <g transform="rotate(-18 251 140)">
+      <rect x="232" y="122" width="36" height="128" rx="18" fill="url(#${gid}limbGrad)"/>
+      <circle cx="250" cy="248" r="15" fill="url(#${gid}limbGrad)"/>
+    </g>
+    <path d="M138 250 Q132 330 138 400 Q140 424 158 424 Q176 424 177 400 Q181 330 179 250 Z" fill="url(#${gid}limbGrad)"/>
+    <path d="M181 250 Q179 330 183 400 Q184 424 202 424 Q220 424 222 400 Q228 330 222 250 Z" fill="url(#${gid}limbGrad)"/>
+    <ellipse cx="156" cy="430" rx="25" ry="10" fill="url(#${gid}limbGrad)"/>
+    <ellipse cx="204" cy="430" rx="25" ry="10" fill="url(#${gid}limbGrad)"/>
+    <path d="M128 150 Q124 118 152 116 L208 116 Q236 118 232 150 Q238 210 226 252 Q222 270 180 270 Q138 270 134 252 Q122 210 128 150 Z" fill="url(#${gid}bodyGrad)"/>
+    <rect x="166" y="102" width="28" height="18" rx="8" fill="url(#${gid}limbGrad)"/>
+    <circle cx="180" cy="64" r="46" fill="url(#${gid}headGrad)"/>`;
+
+  const frontMuscles = `
+    <path ${M('chest_upper')} d="M145 132 Q180 124 215 132 L213 146 Q180 139 147 146 Z"/>
+    <path ${M('chest')} d="M147 148 Q178 142 179 168 Q179 188 158 186 Q140 183 143 160 Z"/>
+    <path ${M('chest')} d="M213 148 Q182 142 181 168 Q181 188 202 186 Q220 183 217 160 Z"/>
+    <path ${M('abs')} d="M162 192 Q180 188 198 192 Q202 220 196 246 Q180 254 164 246 Q158 220 162 192 Z"/>
+    <path ${M('obliques')} d="M144 192 Q152 190 158 194 Q156 222 160 244 Q150 240 144 228 Q140 210 144 192 Z"/>
+    <path ${M('obliques')} d="M216 192 Q208 190 202 194 Q204 222 200 244 Q210 240 216 228 Q220 210 216 192 Z"/>
+    <ellipse ${M('front_delts')} cx="140" cy="132" rx="15" ry="14"/>
+    <ellipse ${M('front_delts')} cx="220" cy="132" rx="15" ry="14"/>
+    <ellipse ${M('side_delts')} cx="122" cy="144" rx="12" ry="13" transform="rotate(18 122 144)"/>
+    <ellipse ${M('side_delts')} cx="238" cy="144" rx="12" ry="13" transform="rotate(-18 238 144)"/>
+    <g transform="rotate(18 109 140)">
+      <path ${M('biceps')} d="M98 156 Q110 150 122 156 Q124 178 120 196 Q110 202 100 196 Q96 178 98 156 Z"/>
+      <path ${M('forearms')} d="M99 202 Q110 198 121 202 Q122 224 117 240 Q110 244 103 240 Q98 224 99 202 Z"/>
+    </g>
+    <g transform="rotate(-18 251 140)">
+      <path ${M('biceps')} d="M238 156 Q250 150 262 156 Q264 178 260 196 Q250 202 240 196 Q236 178 238 156 Z"/>
+      <path ${M('forearms')} d="M239 202 Q250 198 261 202 Q262 224 257 240 Q250 244 243 240 Q238 224 239 202 Z"/>
+    </g>
+    <path ${M('quads')} d="M141 262 Q156 256 172 262 Q176 300 172 345 Q158 353 146 345 Q136 300 141 262 Z"/>
+    <path ${M('quads')} d="M188 262 Q204 256 219 262 Q224 300 214 345 Q202 353 188 345 Q184 300 188 262 Z"/>`;
+
+  const backBody = `
+    <ellipse cx="500" cy="438" rx="95" ry="12" fill="#000" opacity="0.06"/>
+    <g transform="rotate(18 429 140)">
+      <rect x="412" y="122" width="36" height="128" rx="18" fill="url(#${gid}limbGrad)"/>
+      <circle cx="430" cy="248" r="15" fill="url(#${gid}limbGrad)"/>
+    </g>
+    <g transform="rotate(-18 571 140)">
+      <rect x="552" y="122" width="36" height="128" rx="18" fill="url(#${gid}limbGrad)"/>
+      <circle cx="570" cy="248" r="15" fill="url(#${gid}limbGrad)"/>
+    </g>
+    <path d="M458 250 Q452 330 458 400 Q460 424 478 424 Q496 424 497 400 Q501 330 499 250 Z" fill="url(#${gid}limbGrad)"/>
+    <path d="M501 250 Q499 330 503 400 Q504 424 522 424 Q540 424 542 400 Q548 330 542 250 Z" fill="url(#${gid}limbGrad)"/>
+    <ellipse cx="476" cy="430" rx="25" ry="10" fill="url(#${gid}limbGrad)"/>
+    <ellipse cx="524" cy="430" rx="25" ry="10" fill="url(#${gid}limbGrad)"/>
+    <path d="M448 150 Q444 118 472 116 L528 116 Q556 118 552 150 Q558 210 546 252 Q542 270 500 270 Q458 270 454 252 Q442 210 448 150 Z" fill="url(#${gid}bodyGrad)"/>
+    <rect x="486" y="102" width="28" height="18" rx="8" fill="url(#${gid}limbGrad)"/>
+    <circle cx="500" cy="64" r="46" fill="url(#${gid}headGrad)"/>`;
+
+  const backMuscles = `
+    <path ${M('traps')} d="M500 122 Q478 128 462 140 Q480 150 496 172 Q500 176 504 172 Q520 150 538 140 Q522 128 500 122 Z"/>
+    <path ${M('rhomboids')} d="M482 158 Q500 168 518 158 Q516 178 500 184 Q484 178 482 158 Z"/>
+    <path ${M('lats')} d="M458 158 Q470 178 482 188 Q474 216 486 238 Q500 244 514 238 Q526 216 518 188 Q530 178 542 158 Q546 200 536 232 Q524 250 500 250 Q476 250 464 232 Q454 200 458 158 Z"/>
+    <path ${M('lower_back')} d="M478 226 Q500 218 522 226 Q524 244 518 254 Q500 260 482 254 Q476 244 478 226 Z"/>
+    <ellipse ${M('rear_delts')} cx="458" cy="132" rx="15" ry="14"/>
+    <ellipse ${M('rear_delts')} cx="542" cy="132" rx="15" ry="14"/>
+    <ellipse ${M('side_delts')} cx="442" cy="144" rx="12" ry="13" transform="rotate(18 442 144)"/>
+    <ellipse ${M('side_delts')} cx="558" cy="144" rx="12" ry="13" transform="rotate(-18 558 144)"/>
+    <g transform="rotate(18 429 140)">
+      <path ${M('triceps')} d="M418 156 Q430 150 442 156 Q444 178 440 196 Q430 202 420 196 Q416 178 418 156 Z"/>
+      <path ${M('forearms')} d="M419 202 Q430 198 441 202 Q442 224 437 240 Q430 244 423 240 Q418 224 419 202 Z"/>
+    </g>
+    <g transform="rotate(-18 571 140)">
+      <path ${M('triceps')} d="M558 156 Q570 150 582 156 Q584 178 580 196 Q570 202 560 196 Q556 178 558 156 Z"/>
+      <path ${M('forearms')} d="M559 202 Q570 198 581 202 Q582 224 577 240 Q570 244 563 240 Q558 224 559 202 Z"/>
+    </g>
+    <path ${M('glutes')} d="M462 262 Q478 254 496 264 Q500 284 492 296 Q474 302 464 290 Q456 276 462 262 Z"/>
+    <path ${M('glutes')} d="M538 262 Q522 254 504 264 Q500 284 508 296 Q526 302 536 290 Q544 276 538 262 Z"/>
+    <path ${M('hamstrings')} d="M462 302 Q476 298 492 304 Q495 335 490 366 Q477 373 467 366 Q458 335 462 302 Z"/>
+    <path ${M('hamstrings')} d="M508 304 Q524 298 538 302 Q542 335 533 366 Q523 373 510 366 Q505 335 508 304 Z"/>
+    <path ${M('calves')} d="M464 376 Q477 371 490 376 Q493 398 488 414 Q478 419 470 414 Q461 398 464 376 Z"/>
+    <path ${M('calves')} d="M510 376 Q523 371 536 376 Q539 398 532 414 Q522 419 512 414 Q507 398 510 376 Z"/>`;
+
+  if (opts.compact) {
+    // Recorta o viewBox exatamente ao lado (frente 0-360 / costas 320-680) com
+    // maior envolvimento — a geometria original já está desenhada lado a lado.
+    const frontKeys = ['chest','chest_upper','front_delts','side_delts','biceps','forearms','abs','obliques','quads'];
+    const backKeys  = ['lats','traps','rear_delts','triceps','rhomboids','lower_back','glutes','hamstrings','calves'];
+    const fs = frontKeys.reduce((a,k) => a + (map[k]||0), 0);
+    const bs = backKeys.reduce((a,k) => a + (map[k]||0), 0);
+    const box = bs > fs ? '320 0 360 460' : '0 0 360 460';
+    const body = bs > fs ? backBody : frontBody;
+    const muscles = bs > fs ? backMuscles : frontMuscles;
+    return `<svg viewBox="${box}" xmlns="http://www.w3.org/2000/svg" style="width:100%;height:100%;display:block;"><defs>${defs}</defs>${body}${muscles}</svg>`;
+  }
+
+  return `
+    <svg viewBox="0 0 680 460" xmlns="http://www.w3.org/2000/svg" class="w-full" style="max-width:340px;margin:0 auto;display:block;">
+      <defs>${defs}</defs>
+      ${frontBody}${frontMuscles}
+      <text x="180" y="16" text-anchor="middle" fill="#71717a" font-size="13" font-family="sans-serif">Frente</text>
+      ${backBody}${backMuscles}
+      <text x="500" y="16" text-anchor="middle" fill="#71717a" font-size="13" font-family="sans-serif">Costas</text>
+    </svg>`;
+}
+
+function renderExerciseCard(e){
+  const muscles = (e.exercise_muscles || []).slice().sort((a,b) => b.involvement_pct - a.involvement_pct);
+  const mech = e.mechanic ? (e.mechanic === 'composto' ? 'Composto' : 'Isolado') : '';
+  const open = expandedExerciseId === e.id;
+  return `
+    <div class="card rounded-2xl overflow-hidden">
+      <button onclick="toggleExercise('${e.id}')" class="w-full flex items-center gap-3 p-3.5 text-left">
+        <div class="w-10 h-10 rounded-xl bg-neutral-800 flex items-center justify-center shrink-0">
+          <i data-lucide="dumbbell" class="w-5 h-5 text-[var(--accent)]"></i>
+        </div>
+        <div class="flex-1 min-w-0">
+          <p class="text-sm font-semibold text-white truncate">${esc(e.name)}</p>
+          <p class="text-[11px] text-slate-500 mt-0.5">${gymGroupLabel(e.muscle_group)} · ${esc(e.equipment)}${mech ? ` · ${mech}` : ''}</p>
+        </div>
+        <i data-lucide="chevron-${open ? 'up' : 'down'}" class="w-4 h-4 text-slate-500 shrink-0"></i>
+      </button>
+      ${open ? `
+        <div class="px-3.5 pb-3.5 space-y-2">
+          <div class="bg-neutral-900/40 rounded-xl py-2">${muscleDiagramSVG(exerciseMuscleMap(e))}</div>
+          <p class="text-[10px] uppercase tracking-wide text-slate-500 font-semibold mb-1">Músculos trabalhados</p>
+          ${muscles.map(m => {
+            const name = m.muscles?.name || '—';
+            const color = m.role === 'primario' ? 'var(--accent)' : (m.role === 'estabilizador' ? '#3f3f46' : '#52525b');
+            return `
+              <div class="flex items-center gap-2">
+                <span class="text-[11px] text-slate-300 w-32 shrink-0 truncate">${esc(name)}</span>
+                <div class="flex-1 h-2 rounded-full bg-neutral-800 overflow-hidden">
+                  <div class="h-full rounded-full" style="width:${m.involvement_pct}%;background:${color};"></div>
+                </div>
+                <span class="text-[10px] text-slate-400 w-8 text-right shrink-0">${m.involvement_pct}%</span>
+              </div>`;
+          }).join('')}
+        </div>` : ''}
+    </div>`;
+}
+
+/* ---------- Planos de treino ---------- */
+function gymExerciseById(id){ return (gymRef.exercises || []).find(e => e.id === id); }
+function findPlan(id){ return gymPlans.find(p => p.id === id); }
+function planDays(plan){
+  return (plan.workout_plan_days || []).slice().sort((a,b) =>
+    (a.order_index - b.order_index) || (a.created_at < b.created_at ? -1 : 1));
+}
+function dayExercises(day){
+  return (day.workout_plan_exercises || []).slice().sort((a,b) =>
+    (a.order_index - b.order_index) || (a.created_at < b.created_at ? -1 : 1));
+}
+
+function renderPlanos(){
+  if (gymPlanView === 'picker') return renderExercisePicker();
+  if (gymPlanView === 'detail') return renderPlanDetail();
+  return renderPlanList();
+}
+
+function renderPlanList(){
+  return `
+    <div class="space-y-4 fade-in">
+      <div class="flex items-center justify-between gap-2">
+        <div class="flex items-center gap-2 min-w-0">
+          <div class="w-9 h-9 rounded-xl flex items-center justify-center shrink-0" style="background:linear-gradient(135deg,#1e3a8a,#6366f1);">
+            <i data-lucide="clipboard-list" class="w-5 h-5 text-white"></i>
+          </div>
+          <div class="min-w-0">
+            <h2 class="text-sm font-bold text-white leading-none">Planos de treino</h2>
+            <p class="text-[11px] text-slate-500 mt-1">${gymPlans.length} plano(s)</p>
+          </div>
+        </div>
+        <button onclick="toggleNewPlan()" class="flex items-center gap-1 bg-[var(--accent)] text-neutral-950 text-xs font-bold pl-2.5 pr-3 py-1.5 rounded-full active:scale-95 transition shrink-0">
+          <i data-lucide="plus" class="w-3.5 h-3.5"></i> Plano
+        </button>
+      </div>
+
+      ${gymNewPlanOpen ? `
+        <div class="card rounded-2xl p-3.5 space-y-2 fade-in">
+          <input id="newPlanName" type="text" placeholder="Nome do plano (ex: Push/Pull/Legs)"
+            class="w-full bg-neutral-900 border border-neutral-800 rounded-xl px-3 py-2 text-sm text-white outline-none focus:border-[var(--accent)]/60" />
+          <div class="flex gap-2">
+            <button onclick="submitNewPlan()" class="flex-1 bg-[var(--accent)] text-neutral-950 font-bold text-sm rounded-xl py-2 active:scale-[0.98] transition">Criar</button>
+            <button onclick="toggleNewPlan()" class="px-4 text-xs text-slate-400">Cancelar</button>
+          </div>
+        </div>` : ''}
+
+      ${gymPlans.length === 0 && !gymNewPlanOpen ? `
+        <div class="min-h-[38vh] flex flex-col items-center justify-center text-center px-6">
+          <i data-lucide="clipboard-list" class="w-10 h-10 text-slate-600 mb-3"></i>
+          <p class="text-xs text-slate-500 max-w-xs leading-relaxed">Ainda não tens planos. Cria o teu primeiro (ex: um dia Push, outro Pull) e adiciona exercícios da biblioteca.</p>
+        </div>` : ''}
+
+      <div class="space-y-2.5">
+        ${gymPlans.map(renderPlanCard).join('')}
+      </div>
+    </div>`;
+}
+
+function renderPlanCard(p){
+  const days = planDays(p);
+  const totalEx = days.reduce((s,d) => s + dayExercises(d).length, 0);
+  return `
+    <button onclick="openPlan('${p.id}')" class="card rounded-2xl p-3.5 w-full text-left flex items-center gap-3">
+      <div class="w-10 h-10 rounded-xl bg-neutral-800 flex items-center justify-center shrink-0">
+        <i data-lucide="clipboard-list" class="w-5 h-5 text-[var(--accent)]"></i>
+      </div>
+      <div class="flex-1 min-w-0">
+        <p class="text-sm font-semibold text-white truncate">${esc(p.name)}</p>
+        <p class="text-[11px] text-slate-500 mt-0.5">${days.length} dia(s) · ${totalEx} exercício(s)</p>
+      </div>
+      <i data-lucide="chevron-right" class="w-4 h-4 text-slate-500 shrink-0"></i>
+    </button>`;
+}
+
+function renderPlanDetail(){
+  const plan = findPlan(activePlanId);
+  if (!plan) { gymPlanView = 'list'; return renderPlanList(); }
+  const days = planDays(plan);
+  return `
+    <div class="space-y-4 fade-in">
+      <div class="flex items-center gap-2">
+        <button onclick="closePlan()" class="w-8 h-8 rounded-lg bg-neutral-800 flex items-center justify-center shrink-0">
+          <i data-lucide="arrow-left" class="w-4 h-4 text-slate-300"></i>
+        </button>
+        <div class="flex-1 min-w-0">
+          <h2 class="text-sm font-bold text-white truncate">${esc(plan.name)}</h2>
+          <p class="text-[11px] text-slate-500 mt-0.5">${days.length} dia(s) de treino</p>
+        </div>
+        <button onclick="deletePlan('${plan.id}')" class="w-8 h-8 rounded-lg border border-red-500/40 flex items-center justify-center shrink-0">
+          <i data-lucide="trash-2" class="w-4 h-4 text-red-400"></i>
+        </button>
+      </div>
+
+      ${days.map(renderPlanDay).join('')}
+
+      ${gymNewDayOpen ? renderNewDayForm() : `
+        <button onclick="toggleNewDay()" class="w-full border-2 border-dashed border-neutral-700 rounded-2xl py-3 text-xs font-semibold text-slate-400 flex items-center justify-center gap-1.5 active:scale-[0.99] transition">
+          <i data-lucide="plus" class="w-4 h-4"></i> Adicionar dia
+        </button>`}
+    </div>`;
+}
+
+function renderNewDayForm(){
+  return `
+    <div class="card rounded-2xl p-3.5 space-y-3 fade-in">
+      <input id="newDayName" type="text" placeholder="Nome do dia (ex: Push, Pull, Pernas)"
+        class="w-full bg-neutral-900 border border-neutral-800 rounded-xl px-3 py-2 text-sm text-white outline-none focus:border-[var(--accent)]/60" />
+      <div>
+        <p class="text-[10px] uppercase tracking-wide text-slate-500 font-semibold mb-1.5">Dia da semana (opcional)</p>
+        <div class="flex gap-1.5 flex-wrap">
+          ${WEEKDAYS.map(w => `
+            <button type="button" data-wd="${w.v}" onclick="pickWeekday(${w.v})"
+              class="wd-chip mealtype-pill ${newDayWeekday===w.v?'active':''} border border-neutral-700 rounded-full px-3 py-1.5 text-[11px] text-slate-300 transition">${w.label}</button>`).join('')}
+        </div>
+      </div>
+      <div class="flex gap-2">
+        <button onclick="submitNewDay()" class="flex-1 bg-[var(--accent)] text-neutral-950 font-bold text-sm rounded-xl py-2 active:scale-[0.98] transition">Adicionar</button>
+        <button onclick="toggleNewDay()" class="px-4 text-xs text-slate-400">Cancelar</button>
+      </div>
+    </div>`;
+}
+
+function renderPlanDay(day){
+  const exs = dayExercises(day);
+  const wd = WEEKDAYS.find(w => w.v === day.weekday);
+  return `
+    <div class="card rounded-2xl overflow-hidden">
+      <div class="flex items-center gap-3 p-3.5 border-b border-neutral-800">
+        <div class="w-14 h-14 rounded-xl bg-neutral-900/60 shrink-0 flex items-center justify-center overflow-hidden">
+          ${exs.length ? muscleDiagramSVG(planDayMuscleMap(day), { compact: true }) : `<i data-lucide="dumbbell" class="w-5 h-5 text-slate-600"></i>`}
+        </div>
+        <div class="flex-1 min-w-0">
+          <p class="text-sm font-semibold text-white truncate">${esc(day.name)}${wd ? ` <span class="text-[10px] font-medium text-[var(--accent)] bg-[var(--accent)]/10 px-1.5 py-0.5 rounded ml-1">${wd.label}</span>` : ''}</p>
+          <p class="text-[11px] text-slate-500 mt-0.5">${exs.length} exercício(s)</p>
+        </div>
+        <button onclick="removeDay('${day.id}')" class="w-7 h-7 rounded-lg border border-neutral-700 flex items-center justify-center shrink-0">
+          <i data-lucide="trash-2" class="w-3.5 h-3.5 text-slate-500"></i>
+        </button>
+      </div>
+      ${exs.length ? `<div class="divide-y divide-neutral-800">${exs.map(renderPlanExerciseRow).join('')}</div>` : ''}
+      <button onclick="openPicker('${day.id}')" class="w-full py-2.5 text-[11px] font-semibold text-[var(--accent)] flex items-center justify-center gap-1 active:bg-neutral-800/50 transition border-t border-neutral-800">
+        <i data-lucide="plus" class="w-3.5 h-3.5"></i> Adicionar exercício
+      </button>
+      ${exs.length ? `
+        <button onclick="startWorkout('${day.id}')" class="w-full py-3 text-xs font-bold text-neutral-950 bg-[var(--accent)] flex items-center justify-center gap-1.5 active:opacity-90 transition">
+          <i data-lucide="play" class="w-4 h-4"></i> Iniciar treino
+        </button>` : ''}
+    </div>`;
+}
+
+function renderPlanExerciseRow(pe){
+  const ex = gymExerciseById(pe.exercise_id);
+  return `
+    <div class="p-3 space-y-2">
+      <div class="flex items-center gap-2">
+        <span class="text-sm text-white flex-1 min-w-0 truncate">${esc(ex ? ex.name : 'Exercício')}</span>
+        <button onclick="removePlanExercise('${pe.id}')" class="w-6 h-6 rounded-md flex items-center justify-center shrink-0">
+          <i data-lucide="x" class="w-3.5 h-3.5 text-slate-500"></i>
+        </button>
+      </div>
+      <div class="grid grid-cols-4 gap-1.5">
+        ${targetInput(pe.id, 'target_sets', pe.target_sets, 'Séries', 'number')}
+        ${targetInput(pe.id, 'target_reps', pe.target_reps, 'Reps', 'text')}
+        ${targetInput(pe.id, 'target_weight', pe.target_weight, 'Kg', 'number')}
+        ${targetInput(pe.id, 'rest_seconds', pe.rest_seconds, 'Desc.(s)', 'number')}
+      </div>
+    </div>`;
+}
+function targetInput(peId, field, val, label, type){
+  return `
+    <div>
+      <label class="block text-[9px] uppercase tracking-wide text-slate-500 mb-0.5">${label}</label>
+      <input type="${type}" value="${val==null ? '' : esc(String(val))}" ${type==='number' ? 'inputmode="decimal" min="0"' : ''}
+        onchange="updatePlanExercise('${peId}','${field}',this.value)"
+        class="w-full bg-neutral-900 border border-neutral-800 rounded-lg px-2 py-1.5 text-xs text-white text-center outline-none focus:border-[var(--accent)]/60" />
+    </div>`;
+}
+
+function renderExercisePicker(){
+  const exercises = gymRef.exercises || [];
+  const filtered = pickerFilter === 'todos' ? exercises : exercises.filter(e => e.muscle_group === pickerFilter);
+  const chips = [{ key:'todos', label:'Todos' }, ...MUSCLE_GROUPS];
+  return `
+    <div class="space-y-4 fade-in">
+      <div class="flex items-center gap-2">
+        <button onclick="closePicker()" class="w-8 h-8 rounded-lg bg-neutral-800 flex items-center justify-center shrink-0">
+          <i data-lucide="arrow-left" class="w-4 h-4 text-slate-300"></i>
+        </button>
+        <h2 class="text-sm font-bold text-white">Adicionar exercício</h2>
+      </div>
+      <div class="flex gap-2 overflow-x-auto no-scrollbar -mx-1 px-1">
+        ${chips.map(c => `
+          <button onclick="setPickerFilter('${c.key}')"
+            class="range-chip ${pickerFilter===c.key?'active':''} shrink-0 border border-neutral-700 rounded-full py-1.5 px-3 text-[11px] font-semibold text-slate-300 transition">${c.label}</button>`).join('')}
+      </div>
+      <div class="space-y-2">
+        ${filtered.map(e => `
+          <button onclick="addExerciseToDay('${e.id}')" class="card rounded-xl p-3 w-full text-left flex items-center gap-3">
+            <div class="w-9 h-9 rounded-lg bg-neutral-800 flex items-center justify-center shrink-0">
+              <i data-lucide="dumbbell" class="w-4 h-4 text-[var(--accent)]"></i>
+            </div>
+            <div class="flex-1 min-w-0">
+              <p class="text-sm font-semibold text-white truncate">${esc(e.name)}</p>
+              <p class="text-[11px] text-slate-500 mt-0.5">${gymGroupLabel(e.muscle_group)} · ${esc(e.equipment)}</p>
+            </div>
+            <i data-lucide="plus" class="w-4 h-4 text-[var(--accent)] shrink-0"></i>
+          </button>`).join('')}
+      </div>
+    </div>`;
+}
+
+/* ----- CRUD dos planos (otimista: muta estado → render → await → rollback) ----- */
+function toggleNewPlan(){
+  gymNewPlanOpen = !gymNewPlanOpen; render();
+  if (gymNewPlanOpen) setTimeout(() => document.getElementById('newPlanName')?.focus(), 0);
+}
+async function submitNewPlan(){
+  const name = (document.getElementById('newPlanName')?.value || '').trim();
+  if (!name) return;
+  gymNewPlanOpen = false;
+  const tmpId = uid();
+  const plan = { id: tmpId, user_id: currentUser.id, name, is_active: true, created_at: new Date().toISOString(), workout_plan_days: [] };
+  gymPlans.push(plan);
+  activePlanId = tmpId; gymPlanView = 'detail'; render();
+  try {
+    const { data, error } = await sb.from('workout_plans').insert({ user_id: currentUser.id, name }).select().single();
+    if (error) throw error;
+    plan.id = data.id; plan.created_at = data.created_at;
+    if (activePlanId === tmpId) activePlanId = data.id;
+    render();
+    logEvent('success', 'gym_plan_create', name);
+  } catch(e){
+    gymPlans = gymPlans.filter(p => p.id !== tmpId);
+    activePlanId = null; gymPlanView = 'list';
+    flashSyncError(e); render();
+  }
+}
+function openPlan(id){ activePlanId = id; gymPlanView = 'detail'; gymNewDayOpen = false; render(); }
+function closePlan(){ gymPlanView = 'list'; activePlanId = null; gymNewDayOpen = false; render(); }
+async function deletePlan(id){
+  if (!confirm('Eliminar este plano e todos os seus dias?')) return;
+  const backup = gymPlans;
+  gymPlans = gymPlans.filter(p => p.id !== id);
+  gymPlanView = 'list'; activePlanId = null; render();
+  try { const { error } = await sb.from('workout_plans').delete().eq('id', id); if (error) throw error; }
+  catch(e){ gymPlans = backup; flashSyncError(e); render(); }
+}
+
+function toggleNewDay(){
+  gymNewDayOpen = !gymNewDayOpen; newDayWeekday = null; render();
+  if (gymNewDayOpen) setTimeout(() => document.getElementById('newDayName')?.focus(), 0);
+}
+function pickWeekday(v){
+  newDayWeekday = (newDayWeekday === v ? null : v);
+  document.querySelectorAll('.wd-chip').forEach(c => c.classList.toggle('active', Number(c.dataset.wd) === newDayWeekday));
+}
+async function submitNewDay(){
+  const plan = findPlan(activePlanId); if (!plan) return;
+  const name = (document.getElementById('newDayName')?.value || '').trim();
+  if (!name) return;
+  const wd = newDayWeekday;
+  gymNewDayOpen = false;
+  const tmpId = uid();
+  const order = planDays(plan).length;
+  const day = { id: tmpId, plan_id: plan.id, user_id: currentUser.id, name, weekday: wd, order_index: order, created_at: new Date().toISOString(), workout_plan_exercises: [] };
+  plan.workout_plan_days = [...(plan.workout_plan_days || []), day];
+  render();
+  try {
+    const { data, error } = await sb.from('workout_plan_days')
+      .insert({ plan_id: plan.id, user_id: currentUser.id, name, weekday: wd, order_index: order }).select().single();
+    if (error) throw error;
+    day.id = data.id; day.created_at = data.created_at;
+    render();
+  } catch(e){
+    plan.workout_plan_days = plan.workout_plan_days.filter(d => d.id !== tmpId);
+    flashSyncError(e); render();
+  }
+}
+async function removeDay(dayId){
+  const plan = findPlan(activePlanId); if (!plan) return;
+  if (!confirm('Remover este dia do plano?')) return;
+  const backup = plan.workout_plan_days;
+  plan.workout_plan_days = plan.workout_plan_days.filter(d => d.id !== dayId);
+  render();
+  try { const { error } = await sb.from('workout_plan_days').delete().eq('id', dayId); if (error) throw error; }
+  catch(e){ plan.workout_plan_days = backup; flashSyncError(e); render(); }
+}
+
+function openPicker(dayId){ pickerDayId = dayId; pickerFilter = 'todos'; gymPlanView = 'picker'; render(); }
+function closePicker(){ gymPlanView = 'detail'; pickerDayId = null; render(); }
+function setPickerFilter(k){ pickerFilter = k; render(); }
+async function addExerciseToDay(exerciseId){
+  const plan = findPlan(activePlanId); if (!plan) return;
+  const day = planDays(plan).find(d => d.id === pickerDayId); if (!day) return;
+  const order = dayExercises(day).length;
+  const tmpId = uid();
+  const pe = { id: tmpId, plan_day_id: day.id, user_id: currentUser.id, exercise_id: exerciseId, order_index: order, target_sets: 3, target_reps: '8-12', target_weight: null, rest_seconds: 90, created_at: new Date().toISOString() };
+  day.workout_plan_exercises = [...(day.workout_plan_exercises || []), pe];
+  gymPlanView = 'detail'; render();
+  try {
+    const { data, error } = await sb.from('workout_plan_exercises')
+      .insert({ plan_day_id: day.id, user_id: currentUser.id, exercise_id: exerciseId, order_index: order, target_sets: 3, target_reps: '8-12', rest_seconds: 90 })
+      .select().single();
+    if (error) throw error;
+    pe.id = data.id; pe.created_at = data.created_at;
+    render();
+  } catch(e){
+    day.workout_plan_exercises = day.workout_plan_exercises.filter(x => x.id !== tmpId);
+    flashSyncError(e); render();
+  }
+}
+async function removePlanExercise(peId){
+  const plan = findPlan(activePlanId); if (!plan) return;
+  let target = null;
+  for (const d of (plan.workout_plan_days || [])) {
+    if ((d.workout_plan_exercises || []).some(x => x.id === peId)) { target = d; break; }
+  }
+  if (!target) return;
+  const backup = target.workout_plan_exercises;
+  target.workout_plan_exercises = target.workout_plan_exercises.filter(x => x.id !== peId);
+  render();
+  try { const { error } = await sb.from('workout_plan_exercises').delete().eq('id', peId); if (error) throw error; }
+  catch(e){ target.workout_plan_exercises = backup; flashSyncError(e); render(); }
+}
+async function updatePlanExercise(peId, field, rawValue){
+  const plan = findPlan(activePlanId); if (!plan) return;
+  let pe = null;
+  for (const d of (plan.workout_plan_days || [])) {
+    const f = (d.workout_plan_exercises || []).find(x => x.id === peId);
+    if (f) { pe = f; break; }
+  }
+  if (!pe) return;
+  let value;
+  if (field === 'target_reps') {
+    value = String(rawValue).trim() || null;
+  } else {
+    value = rawValue === '' ? null : Number(rawValue);
+    if (value != null && (isNaN(value) || value < 0)) return;
+  }
+  const prev = pe[field];
+  pe[field] = value;
+  try { const { error } = await sb.from('workout_plan_exercises').update({ [field]: value }).eq('id', peId); if (error) throw error; }
+  catch(e){ pe[field] = prev; flashSyncError(e); render(); }
+}
+
+/* ---------- Sessão de treino ---------- */
+// Janela de 120 dias cobre os períodos do dashboard (até 3 meses).
+async function loadGymSessions(){
+  if (!currentUser) return;
+  const d = new Date(); d.setDate(d.getDate() - 120);
+  const startISO = d.toISOString().slice(0, 10);
+  const { data } = await sb.from('workout_sessions')
+    .select('*, workout_session_sets(*)')
+    .eq('user_id', currentUser.id)
+    .gte('date', startISO)
+    .order('date', { ascending: false });
+  gymSessions = data || [];
+}
+
+function findSessionSet(id){ return activeSession ? activeSession.sets.find(x => x.id === id) : null; }
+// Agrupa os sets planos de uma sessão por exercício, preservando a ordem.
+function sessionGroups(s){
+  const groups = [];
+  (s.sets || []).forEach(set => {
+    let g = groups.find(g => g.exercise_id === set.exercise_id);
+    if (!g) { g = { exercise_id: set.exercise_id, sets: [] }; groups.push(g); }
+    g.sets.push(set);
+  });
+  return groups;
+}
+
+async function startWorkout(dayId){
+  const plan = findPlan(activePlanId); if (!plan) return;
+  const day = planDays(plan).find(d => d.id === dayId); if (!day) return;
+  const exs = dayExercises(day);
+  if (!exs.length) return;
+
+  const sets = [];
+  exs.forEach(pe => {
+    const n = Math.max(1, Number(pe.target_sets) || 1);
+    for (let i = 0; i < n; i++) {
+      sets.push({ id: uid(), exercise_id: pe.exercise_id, set_index: i, reps: null, weight: (pe.target_weight ?? null), done: false, _targetReps: pe.target_reps });
+    }
+  });
+  activeSession = { id: uid(), name: day.name, date: todayISO(), plan_day_id: day.id, status: 'em-curso', started_at: new Date().toISOString(), sets };
+  gymScreen = 'treino'; render();
+
+  try {
+    const { data: s, error: se } = await sb.from('workout_sessions')
+      .insert({ user_id: currentUser.id, date: activeSession.date, plan_day_id: day.id, name: day.name, status: 'em-curso', started_at: activeSession.started_at })
+      .select().single();
+    if (se) throw se;
+    activeSession.id = s.id;
+    const rows = sets.map(x => ({ session_id: s.id, user_id: currentUser.id, exercise_id: x.exercise_id, set_index: x.set_index, weight: x.weight, done: false }));
+    const { data: inserted, error: xe } = await sb.from('workout_session_sets').insert(rows).select();
+    if (xe) throw xe;
+    (inserted || []).forEach(r => {
+      const m = activeSession.sets.find(x => x.exercise_id === r.exercise_id && x.set_index === r.set_index && String(x.id).startsWith('tmp-'));
+      if (m) m.id = r.id;
+    });
+    render();
+    logEvent('success', 'gym_workout_start', day.name);
+  } catch(e){
+    activeSession = null; gymScreen = null; flashSyncError(e); render();
+  }
+}
+
+function renderTreino(){
+  const s = activeSession;
+  if (!s) { gymScreen = null; return renderGinasio(); }
+  const groups = sessionGroups(s);
+  const doneCount = s.sets.filter(x => x.done).length;
+  return `
+    <div class="space-y-4 fade-in">
+      <div class="flex items-center gap-2">
+        <button onclick="cancelWorkout()" class="w-8 h-8 rounded-lg bg-neutral-800 flex items-center justify-center shrink-0">
+          <i data-lucide="x" class="w-4 h-4 text-slate-300"></i>
+        </button>
+        <div class="flex-1 min-w-0">
+          <h2 class="text-sm font-bold text-white truncate">${esc(s.name || 'Treino')}</h2>
+          <p class="text-[11px] text-slate-500 mt-0.5">${doneCount}/${s.sets.length} séries feitas</p>
+        </div>
+      </div>
+      ${groups.map(renderSessionExercise).join('')}
+      <button onclick="finishWorkout()" class="w-full bg-[var(--accent)] text-neutral-950 font-bold text-sm rounded-xl py-3 flex items-center justify-center gap-1.5 active:scale-[0.98] transition">
+        <i data-lucide="check-circle" class="w-4 h-4"></i> Terminar treino
+      </button>
+    </div>`;
+}
+function renderSessionExercise(g){
+  const ex = gymExerciseById(g.exercise_id);
+  return `
+    <div class="card rounded-2xl overflow-hidden">
+      <div class="p-3.5 border-b border-neutral-800 flex items-center gap-2">
+        <div class="w-9 h-9 rounded-lg bg-neutral-800 flex items-center justify-center shrink-0">
+          <i data-lucide="dumbbell" class="w-4 h-4 text-[var(--accent)]"></i>
+        </div>
+        <p class="text-sm font-semibold text-white flex-1 min-w-0 truncate">${esc(ex ? ex.name : 'Exercício')}</p>
+      </div>
+      <div class="p-3 space-y-2">
+        <div class="grid grid-cols-[1.5rem_1fr_1fr_2rem] gap-2 items-center text-[9px] uppercase tracking-wide text-slate-500 font-semibold px-1">
+          <span>#</span><span class="text-center">Reps</span><span class="text-center">Kg</span><span></span>
+        </div>
+        ${g.sets.map((set, i) => renderSessionSetRow(set, i)).join('')}
+        <button onclick="addSessionSet('${g.exercise_id}')" class="w-full text-[11px] font-semibold text-slate-400 flex items-center justify-center gap-1 py-1.5">
+          <i data-lucide="plus" class="w-3.5 h-3.5"></i> Série
+        </button>
+      </div>
+    </div>`;
+}
+function renderSessionSetRow(set, i){
+  const ph = set._targetReps ? `alvo ${esc(String(set._targetReps))}` : '';
+  return `
+    <div class="grid grid-cols-[1.5rem_1fr_1fr_2rem] gap-2 items-center">
+      <span class="text-xs text-slate-500 text-center">${i + 1}</span>
+      <input type="number" inputmode="numeric" min="0" value="${set.reps == null ? '' : set.reps}" placeholder="${ph}"
+        onchange="updateSessionSet('${set.id}','reps',this.value)"
+        class="w-full bg-neutral-900 border border-neutral-800 rounded-lg px-2 py-1.5 text-xs text-white text-center outline-none focus:border-[var(--accent)]/60" />
+      <input type="number" inputmode="decimal" min="0" step="0.5" value="${set.weight == null ? '' : set.weight}"
+        onchange="updateSessionSet('${set.id}','weight',this.value)"
+        class="w-full bg-neutral-900 border border-neutral-800 rounded-lg px-2 py-1.5 text-xs text-white text-center outline-none focus:border-[var(--accent)]/60" />
+      <button onclick="toggleSessionSetDone('${set.id}')" class="w-8 h-8 rounded-lg border ${set.done ? 'bg-[var(--accent)] border-[var(--accent)]' : 'border-neutral-700'} flex items-center justify-center shrink-0 transition">
+        <i data-lucide="check" class="w-4 h-4 ${set.done ? 'text-neutral-950' : 'text-slate-600'}"></i>
+      </button>
+    </div>`;
+}
+
+async function updateSessionSet(id, field, raw){
+  const set = findSessionSet(id); if (!set) return;
+  const value = raw === '' ? null : Number(raw);
+  if (value != null && (isNaN(value) || value < 0)) return;
+  const prev = set[field]; set[field] = value;
+  if (String(set.id).startsWith('tmp-')) return; // set ainda a persistir; guardado ao obter id
+  try { const { error } = await sb.from('workout_session_sets').update({ [field]: value }).eq('id', id); if (error) throw error; }
+  catch(e){ set[field] = prev; flashSyncError(e); }
+}
+async function toggleSessionSetDone(id){
+  const set = findSessionSet(id); if (!set) return;
+  set.done = !set.done; render();
+  if (String(set.id).startsWith('tmp-')) return;
+  try { const { error } = await sb.from('workout_session_sets').update({ done: set.done }).eq('id', id); if (error) throw error; }
+  catch(e){ set.done = !set.done; flashSyncError(e); render(); }
+}
+async function addSessionSet(exerciseId){
+  const s = activeSession; if (!s) return;
+  const idxs = s.sets.filter(x => x.exercise_id === exerciseId).map(x => x.set_index);
+  const nextIdx = idxs.length ? Math.max(...idxs) + 1 : 0;
+  const set = { id: uid(), exercise_id: exerciseId, set_index: nextIdx, reps: null, weight: null, done: false };
+  let insertAt = -1;
+  s.sets.forEach((x, i) => { if (x.exercise_id === exerciseId) insertAt = i; });
+  s.sets.splice(insertAt + 1, 0, set);
+  render();
+  if (String(s.id).startsWith('tmp-')) return; // sessão ainda a persistir
+  try {
+    const { data, error } = await sb.from('workout_session_sets')
+      .insert({ session_id: s.id, user_id: currentUser.id, exercise_id: exerciseId, set_index: nextIdx, done: false })
+      .select().single();
+    if (error) throw error;
+    set.id = data.id; render();
+  } catch(e){ s.sets = s.sets.filter(x => x !== set); flashSyncError(e); render(); }
+}
+
+async function cancelWorkout(){
+  if (!confirm('Cancelar este treino? Os dados registados serão eliminados.')) return;
+  const s = activeSession; activeSession = null; gymScreen = null; render();
+  if (s && !String(s.id).startsWith('tmp-')) {
+    try { await sb.from('workout_sessions').delete().eq('id', s.id); } catch(e){ flashSyncError(e); }
+  }
+}
+
+async function finishWorkout(){
+  const s = activeSession; if (!s) return;
+  const completedAt = new Date().toISOString();
+  s.status = 'concluido'; s.completed_at = completedAt;
+  lastStats = await computeStats(s);
+  gymScreen = 'stats'; render();
+  if (!String(s.id).startsWith('tmp-')) {
+    try { const { error } = await sb.from('workout_sessions').update({ status: 'concluido', completed_at: completedAt }).eq('id', s.id); if (error) throw error; }
+    catch(e){ flashSyncError(e); }
+  }
+  logEvent('success', 'gym_workout_finish', s.name);
+}
+
+// Volume = Σ reps×carga sobre sets com reps e carga; PR por exercício quando a
+// melhor carga desta sessão supera a melhor carga registada em sessões anteriores.
+async function computeStats(s){
+  const byEx = {};
+  (s.sets || []).forEach(set => {
+    if (set.reps == null || set.weight == null) return;
+    if (!byEx[set.exercise_id]) byEx[set.exercise_id] = { exercise_id: set.exercise_id, volume: 0, setsDone: 0, bestWeight: 0, bestReps: 0 };
+    const g = byEx[set.exercise_id];
+    g.volume += set.reps * set.weight;
+    g.setsDone += 1;
+    if (set.weight > g.bestWeight) { g.bestWeight = set.weight; g.bestReps = set.reps; }
+  });
+  const exIds = Object.keys(byEx);
+  const prevMax = {};
+  if (exIds.length) {
+    const { data } = await sb.from('workout_session_sets')
+      .select('exercise_id, weight')
+      .eq('user_id', currentUser.id)
+      .in('exercise_id', exIds)
+      .neq('session_id', s.id)
+      .not('weight', 'is', null);
+    (data || []).forEach(r => {
+      if (r.weight != null && r.weight > (prevMax[r.exercise_id] || 0)) prevMax[r.exercise_id] = r.weight;
+    });
+  }
+  const exercises = exIds.map(id => {
+    const g = byEx[id];
+    const prev = prevMax[id];
+    return { ...g, isPR: prev !== undefined && g.bestWeight > prev };
+  });
+  return {
+    totalVolume: exercises.reduce((a, g) => a + g.volume, 0),
+    totalSets: exercises.reduce((a, g) => a + g.setsDone, 0),
+    exercises,
+  };
+}
+
+function renderStats(){
+  const st = lastStats;
+  if (!st) { gymScreen = null; return renderGinasio(); }
+  return `
+    <div class="space-y-4 fade-in">
+      <div class="text-center pt-4">
+        <div class="w-16 h-16 rounded-2xl bg-[var(--accent)]/15 flex items-center justify-center mx-auto mb-3">
+          <i data-lucide="trophy" class="w-8 h-8 text-[var(--accent)]"></i>
+        </div>
+        <h2 class="text-lg font-bold text-white">Treino concluído!</h2>
+        <p class="text-xs text-slate-500 mt-1">${esc(activeSession ? activeSession.name : '')}</p>
+      </div>
+      <div class="grid grid-cols-2 gap-3">
+        <div class="card rounded-2xl p-4 text-center">
+          <p class="text-2xl font-bold text-white">${Math.round(st.totalVolume).toLocaleString('pt-PT')}</p>
+          <p class="text-[11px] text-slate-500 mt-1">Volume total (kg)</p>
+        </div>
+        <div class="card rounded-2xl p-4 text-center">
+          <p class="text-2xl font-bold text-white">${st.totalSets}</p>
+          <p class="text-[11px] text-slate-500 mt-1">Séries feitas</p>
+        </div>
+      </div>
+      <div class="space-y-2">
+        <p class="text-[10px] uppercase tracking-wide text-slate-500 font-semibold">Por exercício</p>
+        ${st.exercises.length ? st.exercises.map(g => {
+          const ex = gymExerciseById(g.exercise_id);
+          return `
+            <div class="card rounded-xl p-3 flex items-center gap-3">
+              <div class="flex-1 min-w-0">
+                <p class="text-sm font-semibold text-white truncate">${esc(ex ? ex.name : 'Exercício')}${g.isPR ? ' <span class="text-[9px] font-bold text-neutral-950 bg-[var(--accent)] px-1.5 py-0.5 rounded ml-1">PR</span>' : ''}</p>
+                <p class="text-[11px] text-slate-500 mt-0.5">${g.setsDone} série(s) · melhor ${g.bestWeight}kg × ${g.bestReps}</p>
+              </div>
+              <div class="text-right shrink-0">
+                <p class="text-sm font-bold text-[var(--accent)]">${Math.round(g.volume).toLocaleString('pt-PT')}</p>
+                <p class="text-[9px] text-slate-500">kg vol.</p>
+              </div>
+            </div>`;
+        }).join('') : `<p class="text-xs text-slate-500 text-center py-4">Não registaste séries com reps e carga.</p>`}
+      </div>
+      <button onclick="closeStats()" class="w-full bg-[var(--accent)] text-neutral-950 font-bold text-sm rounded-xl py-3 active:scale-[0.98] transition">Concluir</button>
+    </div>`;
+}
+async function closeStats(){
+  activeSession = null; lastStats = null; gymScreen = null; gymTab = 'planos';
+  await loadGymSessions();
+  render();
+}
+
+// Atalho do FAB: leva à lista de planos para escolher o dia a treinar.
+// Ginásio em beta fechada — não faz nada para quem não tem acesso.
+function fabStartWorkout(){
+  if (!isGymEnabled()) return;
+  closeFab(); gymTab = 'planos'; gymPlanView = 'list'; switchVertical('ginasio');
+}
+// Reflete no botão do FAB se o Ginásio está disponível para esta conta.
+function updateFabWorkoutButtonUI(){
+  const btn = document.getElementById('fabWorkoutBtn');
+  const label = document.getElementById('fabWorkoutLabel');
+  if (!btn || !label) return;
+  const enabled = isGymEnabled();
+  btn.classList.toggle('opacity-50', !enabled);
+  btn.classList.toggle('pointer-events-none', !enabled);
+  btn.classList.toggle('bg-neutral-900/60', !enabled);
+  btn.classList.toggle('bg-neutral-900', enabled);
+  label.innerHTML = enabled
+    ? 'Sessão de treino'
+    : 'Sessão de treino <span class="text-[9px] uppercase text-slate-500">· em breve</span>';
+  label.classList.toggle('text-slate-400', !enabled);
+  label.classList.toggle('text-white', enabled);
+}
+
+/* ---------- Dashboard de evolução ---------- */
+function currentAccentHex(){
+  const a = ACCENT_COLORS.find(a => a.key === (state.profile?.accent_color || 'orange'));
+  return a ? a.light : '#fb923c';
+}
+// Género do utilizador para escolher a silhueta ('F' feminina, senão masculina).
+function userGender(){ return state.profile?.gender === 'F' ? 'F' : 'M'; }
+function gymRangeBounds(range){
+  const today = todayISO();
+  if (range === 'semana') return { start: startOfWeekISO(), end: today };
+  if (range === 'mes')    return { start: startOfMonthISO(), end: today };
+  const d = new Date(); d.setDate(d.getDate() - 89); // trimestre: últimos 90 dias
+  return { start: d.toISOString().slice(0, 10), end: today };
+}
+function sessionVolume(s){
+  return (s.workout_session_sets || []).reduce((a, set) => a + ((set.reps || 0) * (set.weight || 0)), 0);
+}
+function gymSessionsInRange(range){
+  const { start, end } = gymRangeBounds(range);
+  return gymSessions.filter(s => s.date >= start && s.date <= end);
+}
+function trainedExercisesInRange(range){
+  const ids = [];
+  gymSessionsInRange(range).forEach(s => (s.workout_session_sets || []).forEach(set => {
+    if (set.weight != null && !ids.includes(set.exercise_id)) ids.push(set.exercise_id);
+  }));
+  return ids;
+}
+
+function setGymRange(r){ gymRange = r; refreshGymDashboard(); }
+function selectGymExercise(id){ gymChartExercise = id || null; refreshGymDashboard(); }
+function refreshGymDashboard(){
+  const main = document.getElementById('tab-content');
+  if (!main) return;
+  main.innerHTML = renderGymDashboard();
+  if (window.lucide) lucide.createIcons();
+  requestAnimationFrame(renderGymCharts);
+}
+
+function renderGymDashboard(){
+  const sessions = gymSessionsInRange(gymRange);
+  const totalVol = sessions.reduce((a, s) => a + sessionVolume(s), 0);
+  const totalSets = sessions.reduce((a, s) => a + (s.workout_session_sets || []).filter(x => x.reps != null && x.weight != null).length, 0);
+  const trained = trainedExercisesInRange(gymRange);
+  if (gymChartExercise && !trained.includes(gymChartExercise)) gymChartExercise = null;
+  const ranges = [{ k:'semana', l:'Esta Semana' }, { k:'mes', l:'Este Mês' }, { k:'trimestre', l:'3 Meses' }];
+
+  return `
+    <div class="space-y-4 fade-in">
+      <div class="flex items-center gap-2">
+        <div class="w-9 h-9 rounded-xl flex items-center justify-center shrink-0" style="background:linear-gradient(135deg,#1e3a8a,#6366f1);">
+          <i data-lucide="trending-up" class="w-5 h-5 text-white"></i>
+        </div>
+        <div><h2 class="text-sm font-bold text-white leading-none">Evolução</h2>
+        <p class="text-[11px] text-slate-500 mt-1">${sessions.length} treino(s) no período</p></div>
+      </div>
+
+      <div class="flex gap-2">
+        ${ranges.map(r => `
+          <button onclick="setGymRange('${r.k}')" class="range-chip ${gymRange===r.k?'active':''} flex-1 border border-neutral-700 rounded-xl py-2 text-xs font-semibold text-slate-300 transition">${r.l}</button>`).join('')}
+      </div>
+
+      <div class="grid grid-cols-3 gap-2">
+        <div class="card rounded-2xl p-3 text-center">
+          <p class="text-lg font-bold text-white leading-none">${sessions.length}</p>
+          <p class="text-[10px] text-slate-500 mt-1.5">Treinos</p>
+        </div>
+        <div class="card rounded-2xl p-3 text-center">
+          <p class="text-lg font-bold text-white leading-none">${Math.round(totalVol).toLocaleString('pt-PT')}</p>
+          <p class="text-[10px] text-slate-500 mt-1.5">Volume (kg)</p>
+        </div>
+        <div class="card rounded-2xl p-3 text-center">
+          <p class="text-lg font-bold text-white leading-none">${totalSets}</p>
+          <p class="text-[10px] text-slate-500 mt-1.5">Séries</p>
+        </div>
+      </div>
+
+      ${sessions.length === 0 ? `
+        <div class="min-h-[30vh] flex flex-col items-center justify-center text-center px-6">
+          <i data-lucide="bar-chart-3" class="w-10 h-10 text-slate-600 mb-3"></i>
+          <p class="text-xs text-slate-500 max-w-xs leading-relaxed">Ainda não há treinos neste período. Termina uma sessão de treino para veres a tua evolução aqui.</p>
+        </div>` : `
+        <div class="card rounded-2xl p-3.5">
+          <p class="text-[11px] font-semibold text-slate-300 mb-2">Volume por dia</p>
+          <canvas id="gymVolChart" height="150"></canvas>
+        </div>
+
+        <div class="card rounded-2xl p-3.5 space-y-3">
+          <div class="flex items-center justify-between gap-2">
+            <p class="text-[11px] font-semibold text-slate-300">Progressão por exercício</p>
+          </div>
+          <select onchange="selectGymExercise(this.value)"
+            class="w-full bg-neutral-900 border border-neutral-800 rounded-xl px-3 py-2 text-xs text-white outline-none focus:border-[var(--accent)]/60">
+            <option value="">Escolhe um exercício…</option>
+            ${trained.map(id => { const ex = gymExerciseById(id); return `<option value="${id}" ${gymChartExercise===id?'selected':''}>${esc(ex ? ex.name : id)}</option>`; }).join('')}
+          </select>
+          ${gymChartExercise ? `<canvas id="gymExChart" height="150"></canvas>` :
+            `<p class="text-[11px] text-slate-500 text-center py-4">Escolhe um exercício para veres a evolução da carga.</p>`}
+        </div>`}
+    </div>`;
+}
+
+function renderGymCharts(){
+  Chart.defaults.color = theme === 'light' ? '#475569' : '#a1a1aa';
+  const gridColor = theme === 'light' ? 'rgba(148,163,184,0.35)' : 'rgba(63,63,70,0.4)';
+  const accent = currentAccentHex();
+  const { start, end } = gymRangeBounds(gymRange);
+
+  // Volume por dia (barras)
+  if (gymCharts.vol) { gymCharts.vol.destroy(); gymCharts.vol = null; }
+  const volCanvas = document.getElementById('gymVolChart');
+  if (volCanvas) {
+    const byDay = {};
+    for (let d = new Date(start); d.toISOString().slice(0,10) <= end; d.setDate(d.getDate()+1)) byDay[d.toISOString().slice(0,10)] = 0;
+    gymSessions.forEach(s => { if (s.date >= start && s.date <= end) byDay[s.date] = (byDay[s.date] || 0) + sessionVolume(s); });
+    const days = Object.keys(byDay).sort();
+    gymCharts.vol = new Chart(volCanvas, {
+      data: {
+        labels: days.map(d => d.slice(8,10) + '/' + d.slice(5,7)),
+        datasets: [{ type:'bar', label:'Volume (kg)', data: days.map(d => byDay[d]), backgroundColor: hexToRgba(accent, 0.6), borderRadius:4 }]
+      },
+      options: {
+        responsive:true,
+        plugins:{ legend:{ display:false } },
+        scales:{ y:{ beginAtZero:true, grid:{ color:gridColor } }, x:{ grid:{ display:false } } }
+      }
+    });
+  }
+
+  // Progressão da carga por exercício (linha)
+  if (gymCharts.ex) { gymCharts.ex.destroy(); gymCharts.ex = null; }
+  const exCanvas = document.getElementById('gymExChart');
+  if (exCanvas && gymChartExercise) {
+    const points = [];
+    gymSessions.filter(s => s.date >= start && s.date <= end)
+      .slice().sort((a,b) => a.date < b.date ? -1 : 1)
+      .forEach(s => {
+        const best = (s.workout_session_sets || [])
+          .filter(x => x.exercise_id === gymChartExercise && x.weight != null)
+          .reduce((m,x) => Math.max(m, x.weight), 0);
+        if (best > 0) points.push({ date: s.date, best });
+      });
+    gymCharts.ex = new Chart(exCanvas, {
+      type:'line',
+      data: {
+        labels: points.map(p => p.date.slice(8,10) + '/' + p.date.slice(5,7)),
+        datasets: [{ label:'Melhor carga (kg)', data: points.map(p => p.best), borderColor: accent, backgroundColor: hexToRgba(accent, 0.15), fill:true, tension:0.3, pointRadius:3, borderWidth:2 }]
+      },
+      options: {
+        responsive:true,
+        plugins:{ legend:{ display:false } },
+        scales:{ y:{ beginAtZero:false, grid:{ color:gridColor } }, x:{ grid:{ display:false } } }
+      }
+    });
+  }
 }
 
 /* ============================= DASHBOARD ============================= */

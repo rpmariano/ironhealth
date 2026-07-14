@@ -25,20 +25,32 @@ const GEMINI_MODEL = "gemini-flash-latest";
 
 // Colunas de métricas guardadas na BD e devolvidas pelo Gemini. A ordem/labels
 // aqui espelham o que a app Renpho Health mostra num print típico.
-const METRIC_FIELDS: { key: string; label: string }[] = [
-  { key: "weight_kg", label: "Peso (kg)" },
-  { key: "bmi", label: "IMC" },
-  { key: "body_fat_pct", label: "Gordura corporal (%)" },
-  { key: "skeletal_muscle_pct", label: "Músculo esquelético (%)" },
-  { key: "muscle_mass_kg", label: "Massa muscular (kg)" },
-  { key: "body_water_pct", label: "Água corporal (%)" },
-  { key: "protein_pct", label: "Proteína (%)" },
-  { key: "bone_mass_kg", label: "Massa óssea (kg)" },
-  { key: "bmr_kcal", label: "Metabolismo basal (kcal)" },
-  { key: "visceral_fat", label: "Gordura visceral (índice)" },
-  { key: "subcutaneous_fat_pct", label: "Gordura subcutânea (%)" },
-  { key: "metabolic_age", label: "Idade metabólica (anos)" },
-  { key: "lean_body_mass_kg", label: "Massa magra (kg)" },
+// `label` = descrição curta (usada no histórico enviado ao Gemini).
+// `renpho` = como o termo aparece na app Renpho Health em português (inclui a
+//   grafia real da app, ex.: "Viceral"). `hint` = regra de desambiguação para
+//   a extração — calibrado com screenshots reais da Renpho.
+const METRIC_FIELDS: { key: string; label: string; renpho: string; hint?: string }[] = [
+  { key: "weight_kg", label: "Peso (kg)", renpho: "Peso", hint: "em kg" },
+  { key: "bmi", label: "IMC", renpho: "IMC", hint: "índice (ex.: 25.2)" },
+  { key: "body_fat_pct", label: "Gordura corporal (%)", renpho: "Gordura corporal",
+    hint: "USA A PERCENTAGEM (ex.: 26.0 %), NÃO o valor em kg que aparece no donut da Visão geral" },
+  { key: "skeletal_muscle_pct", label: "Músculo esquelético (%)", renpho: "Músculo esquelético", hint: "em %" },
+  { key: "muscle_mass_kg", label: "Massa muscular (kg)", renpho: "Massa Muscular",
+    hint: "USA OS KG (ex.: 56.70 kg), não a % que aparece ao lado" },
+  { key: "body_water_pct", label: "Água corporal (%)", renpho: "Água corporal",
+    hint: "USA A PERCENTAGEM (ex.: 53.4 %), não os kg ao lado" },
+  { key: "protein_pct", label: "Proteína (%)", renpho: "Proteína",
+    hint: "USA A PERCENTAGEM (ex.: 16.9 %), não os kg ao lado" },
+  { key: "bone_mass_kg", label: "Massa óssea (kg)", renpho: "Massa óssea",
+    hint: "USA OS KG (ex.: 2.98 kg), não a % ao lado" },
+  { key: "bmr_kcal", label: "Metabolismo basal (kcal)", renpho: "TMB (Taxa Metabólica Basal)",
+    hint: "em kcal (ex.: 1657)" },
+  { key: "visceral_fat", label: "Gordura visceral (índice)", renpho: "Gordura Visceral (por vezes escrito \"Viceral\")",
+    hint: "índice inteiro (ex.: 8), não uma percentagem" },
+  { key: "subcutaneous_fat_pct", label: "Gordura subcutânea (%)", renpho: "Gordura subcutânea", hint: "em %" },
+  { key: "metabolic_age", label: "Idade metabólica (anos)", renpho: "Idade Metabólica", hint: "em anos (ex.: 45)" },
+  { key: "lean_body_mass_kg", label: "Massa magra (kg)", renpho: "Peso corporal sem gordura (massa magra / isenta de gordura)",
+    hint: "em kg (ex.: 59.68)" },
 ];
 
 const RESPONSE_SCHEMA = {
@@ -96,23 +108,33 @@ function historyContext(history: any[]): string {
 }
 
 function buildPrompt(notes: string | null, history: unknown[]): string {
+  const mapping = METRIC_FIELDS
+    .map((f) => `- ${f.key} — na Renpho aparece como "${f.renpho}"${f.hint ? ` — ${f.hint}` : ""}`)
+    .join("\n");
+
   let prompt =
     "As imagens seguintes são capturas de ecrã (screenshots) da aplicação Renpho Health, " +
-    "que mostram os resultados de uma pesagem de composição corporal. " +
-    "Extrai os valores numéricos de cada métrica visível nas imagens. " +
-    "Usa exatamente estas chaves e unidades:\n" +
-    METRIC_FIELDS.map((f) => `- ${f.key}: ${f.label}`).join("\n") +
-    "\n\nRegras de extração:\n" +
-    "- Devolve apenas o número (sem unidades). Usa ponto decimal.\n" +
-    "- Se uma métrica não estiver visível nas imagens, devolve null nessa chave.\n" +
-    "- A gordura visceral da Renpho é um índice inteiro (ex.: 8), não uma percentagem.\n" +
-    "- Combina a informação de todas as imagens; não inventes valores que não aparecem.\n\n" +
+    "em português, que mostram os resultados de uma pesagem de composição corporal " +
+    "(ecrãs possíveis: \"Composição corporal / Comparativo\", \"Relatório de métricas / Visão geral\", ou \"Tendências\"). " +
+    "Extrai o valor numérico ATUAL de cada métrica. Devolve exatamente estas chaves:\n" +
+    mapping +
+    "\n\nRegras de extração (importantes — calibradas com a app real):\n" +
+    "- Devolve apenas o número, sem unidades nem símbolos. Usa ponto como separador decimal.\n" +
+    "- Se uma métrica não aparecer em nenhuma imagem, devolve null nessa chave (não inventes).\n" +
+    "- Várias métricas da Renpho mostram DOIS valores (ex.: \"56.70 kg, 70.3 %\"). Segue rigorosamente " +
+    "a unidade indicada em cada chave acima (kg ou %).\n" +
+    "- IGNORA as etiquetas de estado ao lado dos valores (ex.: \"Média\", \"Alto\", \"Baixo\", " +
+    "\"Ligeiramente alto\", \"Excelente\") — não são valores.\n" +
+    "- No ecrã \"Comparativo\", cada cartão mostra o valor grande (atual) e por baixo uma variação " +
+    "com sinal (ex.: \"−0.40\", \"+0.1\"). Extrai SEMPRE o valor grande atual, NUNCA a variação.\n" +
+    "- No ecrã \"Tendências\" (gráfico), usa o valor mais recente/último ponto, não a meta nem os extremos.\n" +
+    "- Combina a informação de todas as imagens numa única leitura coerente da mesma pesagem.\n\n" +
     // deno-lint-ignore no-explicit-any
     historyContext(history as any[]) +
     "\n\nNo campo \"summary\" escreve uma breve avaliação (2 a 4 frases, em português de Portugal) " +
     "dos valores desta pesagem: o que está bom e o que merece atenção. " +
     "Se existir histórico acima, compara com a avaliação mais recente e comenta a evolução " +
-    "(o que melhorou, o que piorou, ex.: peso, gordura, massa muscular). " +
+    "(o que melhorou, o que piorou, ex.: peso, gordura corporal, massa muscular). " +
     "Sê direto e prático, sem alarmismos e sem dar diagnósticos médicos.";
   if (notes && notes.trim()) {
     prompt +=

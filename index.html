@@ -158,6 +158,11 @@
         <span class="w-7 h-7 rounded-full flex items-center justify-center text-white shrink-0" style="background:linear-gradient(135deg,#065f46,#10b981);"><i data-lucide="camera" class="w-3.5 h-3.5"></i></span>
         <span class="text-xs font-semibold text-white whitespace-nowrap">Registar refeição</span>
       </button>
+      <button onclick="fabCreateAssessment()" type="button"
+        class="flex items-center gap-2 bg-neutral-900 border border-neutral-800 pl-2.5 pr-3.5 py-2 rounded-full shadow-lg active:scale-95 transition">
+        <span class="w-7 h-7 rounded-full flex items-center justify-center text-white shrink-0" style="background:linear-gradient(135deg,#065f46,#14b8a6);"><i data-lucide="scale" class="w-3.5 h-3.5"></i></span>
+        <span class="text-xs font-semibold text-white whitespace-nowrap">Nova avaliação</span>
+      </button>
       <div class="flex items-center gap-2 bg-neutral-900/60 border border-neutral-800 pl-2.5 pr-3.5 py-2 rounded-full opacity-50">
         <span class="w-7 h-7 rounded-full flex items-center justify-center text-white shrink-0" style="background:linear-gradient(135deg,#9a3412,#f97316);"><i data-lucide="footprints" class="w-3.5 h-3.5"></i></span>
         <span class="text-xs font-semibold text-slate-400 whitespace-nowrap">Nova corrida <span class="text-[9px] uppercase text-slate-500">· em breve</span></span>
@@ -215,11 +220,33 @@ const MICROS = [
   { key:'potassium_mg', label:'Potássio', unit:'mg' },
 ];
 
+// Métricas de composição corporal (Renpho Health). `dec` = casas decimais na
+// apresentação; `good` indica o sentido saudável da variação ('up' = subir é
+// melhor, 'down' = descer é melhor, null = neutro) e serve para colorir os
+// deltas entre avaliações. As chaves espelham as colunas de body_assessments.
+const BODY_METRICS = [
+  { key:'weight_kg',            label:'Peso',              unit:'kg',   dec:1, color:'#fb923c', good:null },
+  { key:'bmi',                  label:'IMC',               unit:'',     dec:1, color:'#f59e0b', good:'down' },
+  { key:'body_fat_pct',         label:'Gordura corporal',  unit:'%',    dec:1, color:'#ef4444', good:'down' },
+  { key:'skeletal_muscle_pct',  label:'Músculo esquelético', unit:'%',  dec:1, color:'#10b981', good:'up' },
+  { key:'muscle_mass_kg',       label:'Massa muscular',    unit:'kg',   dec:1, color:'#22c55e', good:'up' },
+  { key:'body_water_pct',       label:'Água corporal',     unit:'%',    dec:1, color:'#38bdf8', good:'up' },
+  { key:'protein_pct',          label:'Proteína',          unit:'%',    dec:1, color:'#a78bfa', good:'up' },
+  { key:'bone_mass_kg',         label:'Massa óssea',       unit:'kg',   dec:1, color:'#94a3b8', good:null },
+  { key:'bmr_kcal',             label:'Metabolismo basal', unit:'kcal', dec:0, color:'#facc15', good:'up' },
+  { key:'visceral_fat',         label:'Gordura visceral',  unit:'',     dec:0, color:'#f97316', good:'down' },
+  { key:'subcutaneous_fat_pct', label:'Gordura subcutânea', unit:'%',   dec:1, color:'#fb7185', good:'down' },
+  { key:'metabolic_age',        label:'Idade metabólica',  unit:'anos', dec:0, color:'#c084fc', good:'down' },
+  { key:'lean_body_mass_kg',    label:'Massa magra',       unit:'kg',   dec:1, color:'#2dd4bf', good:'up' },
+];
+
 // As "verticais" do IronHealth Coach — Nutrição está implementada; as restantes
 // são placeholders "Em breve" até serem desenhadas.
 const VERTICALS = [
   { key:'home', label:'Início', icon:'layout-grid' },
   { key:'nutricao', label:'Nutrição', icon:'utensils' },
+  { key:'corpo', label:'Corpo', icon:'scale', from:'#065f46', to:'#14b8a6',
+    desc:'Envia prints da app Renpho Health e a IA extrai as métricas de composição corporal, avalia os números e acompanha a tua evolução ao longo do tempo.' },
   { key:'ginasio', label:'Ginásio', icon:'dumbbell', from:'#1e3a8a', to:'#6366f1',
     desc:'Regista os teus treinos de ginásio e acompanha a evolução de cargas, séries e repetições ao longo do tempo.' },
   { key:'corrida', label:'Corrida', icon:'footprints', from:'#9a3412', to:'#f97316',
@@ -296,6 +323,20 @@ let calendarViewMonth = todayISO().slice(0,7);   // 'YYYY-MM' do mês visível
 let calendarSelectedDate = todayISO();
 let calendarCache = {};       // 'YYYY-MM' -> refeições desse mês (meses != atual)
 let calendarLoading = false;
+
+/* ===== Avaliação Corporal (vertical "Corpo") ===== */
+let bodyAssessments = [];      // [{ ...avaliação }] ordenadas por data desc
+let bodyTab = 'avaliacoes';    // 'avaliacoes' | 'evolucao'
+let bodyPhotos = [];           // [{ dataUrl, base64 }] prints comprimidos prontos a enviar
+let bodyDate = todayISO();     // data pré-preenchida da nova avaliação
+let bodyNotes = '';            // observação livre antes da análise
+let analyzingBody = false;
+let bodyError = null;
+let bodySuccess = null;        // { date } — confirmação após registar
+let expandedAssessmentId = null;
+let reanalyzingAssessmentId = null;
+let selectedBodyMetric = 'weight_kg'; // métrica mostrada no gráfico de evolução
+let bodyChart = null;
 
 /* ============================= HELPERS ============================= */
 function todayISO(){ return new Date().toISOString().slice(0,10); }
@@ -480,6 +521,15 @@ async function loadAllData(){
       .eq('user_id', userId)
       .order('created_at', { ascending: true });
     coachMessages = cMsgs || [];
+
+    // Avaliações corporais — histórico completo (poucas linhas por utilizador).
+    const { data: assessments } = await sb
+      .from('body_assessments')
+      .select('*')
+      .eq('user_id', userId)
+      .order('date', { ascending: false })
+      .order('created_at', { ascending: false });
+    bodyAssessments = assessments || [];
 
     syncError = null;
   } catch(e) {
@@ -1047,6 +1097,15 @@ function fabCreateMeal(){
   closeFab();
   goToRegistarForDate(todayISO());
 }
+function fabCreateAssessment(){
+  closeFab();
+  activeVertical = 'corpo';
+  bodyTab = 'avaliacoes';
+  bodyError = null;
+  bodySuccess = null;
+  abandonManualMealSession();
+  render();
+}
 document.addEventListener('click', (e) => {
   const fabRoot = document.getElementById('fabRoot');
   if (fabOpen && fabRoot && !fabRoot.contains(e.target)) closeFab();
@@ -1255,8 +1314,10 @@ function render(){
       main.classList.remove('overflow-hidden', 'pb-4', 'flex', 'flex-col');
       main.classList.add('overflow-y-auto', 'pb-28');
       if (activeVertical === 'home') main.innerHTML = renderHome();
+      else if (activeVertical === 'corpo') main.innerHTML = renderBody();
       else main.innerHTML = renderVerticalPlaceholder(VERTICALS.find(v => v.key === activeVertical));
       if (window.lucide) lucide.createIcons();
+      if (activeVertical === 'corpo' && bodyTab === 'evolucao') requestAnimationFrame(renderBodyChart);
     }
     return;
   }
@@ -1322,6 +1383,16 @@ function renderHome(){
           </div>
           <i data-lucide="utensils" class="w-20 h-20 absolute -right-2 -bottom-2 text-white/15"></i>
         </button>
+        <button onclick="switchVertical('corpo')" class="rounded-2xl p-4 text-left relative overflow-hidden min-h-[132px]" style="background:linear-gradient(135deg, #065f46, #14b8a6);">
+          <div class="relative z-10 h-full flex flex-col justify-between">
+            <i data-lucide="scale" class="w-6 h-6 text-white/90"></i>
+            <div>
+              <p class="text-xs font-semibold text-white">Corpo</p>
+              <p class="text-[11px] text-white/80 mt-0.5">${bodyAssessments.length ? `${bodyAssessments.length} avaliação(ões)` : 'Avaliação corporal'}</p>
+            </div>
+          </div>
+          <i data-lucide="scale" class="w-20 h-20 absolute -right-2 -bottom-2 text-white/15"></i>
+        </button>
         <button onclick="switchVertical('ginasio')" class="rounded-2xl p-4 text-left relative overflow-hidden min-h-[132px]" style="background:linear-gradient(135deg, #1e3a8a, #6366f1);">
           <div class="relative z-10 h-full flex flex-col justify-between">
             <i data-lucide="dumbbell" class="w-6 h-6 text-white/90"></i>
@@ -1371,6 +1442,496 @@ function renderVerticalPlaceholder(v){
       </button>
     </div>
   `;
+}
+
+/* ============================= AVALIAÇÃO CORPORAL (vertical "Corpo") ============================= */
+function findAssessmentById(id){ return bodyAssessments.find(a => a.id === id) || null; }
+
+// Avaliação imediatamente anterior (mais antiga) a `a`, para comparar valores.
+// bodyAssessments está ordenada por data desc, logo a anterior está a seguir.
+function previousAssessment(a){
+  const idx = bodyAssessments.findIndex(x => x.id === a.id);
+  return (idx === -1) ? null : (bodyAssessments[idx + 1] || null);
+}
+
+function fmtMetric(m, v){
+  if (v === null || v === undefined || v === '') return '—';
+  const n = Number(v);
+  if (!isFinite(n)) return '—';
+  return n.toFixed(m.dec) + (m.unit ? ' ' + m.unit : '');
+}
+
+// Cor do delta consoante o sentido saudável da métrica (BODY_METRICS.good).
+function deltaClass(m, delta){
+  if (!delta || m.good === null) return 'text-slate-400';
+  const improving = m.good === 'up' ? delta > 0 : delta < 0;
+  return improving ? 'text-emerald-400' : 'text-red-400';
+}
+
+function switchBodyTab(tab){
+  bodyTab = tab;
+  bodyError = null;
+  render();
+}
+
+// Atualização in-place do conteúdo da vertical Corpo (sem tocar no header/strip),
+// espelhando refreshDashboard da Nutrição.
+function refreshBody(){
+  const main = document.getElementById('tab-content');
+  if (!main) return;
+  main.innerHTML = renderBody();
+  if (window.lucide) lucide.createIcons();
+  if (bodyTab === 'evolucao') requestAnimationFrame(renderBodyChart);
+}
+
+async function onBodyPhotoSelected(input){
+  const files = Array.from(input.files || []);
+  input.value = '';
+  if (!files.length) return;
+  bodyError = null;
+  bodySuccess = null;
+  const remaining = MAX_PHOTOS - bodyPhotos.length;
+  if (remaining <= 0) { bodyError = `Máximo de ${MAX_PHOTOS} imagens.`; refreshBody(); return; }
+  for (const file of files.slice(0, remaining)) {
+    try { bodyPhotos.push(await compressImage(file)); }
+    catch(e) { console.warn('Falha a processar imagem', e); }
+  }
+  refreshBody();
+}
+
+function removeBodyPhoto(index){ bodyPhotos.splice(index, 1); bodyError = null; refreshBody(); }
+function clearBodyPhotos(){ bodyPhotos = []; bodyError = null; refreshBody(); }
+function updateBodyNotes(value){ bodyNotes = value; }
+
+async function analyzeBody(){
+  if (!bodyPhotos.length || analyzingBody) return;
+  const date = document.getElementById('bodyDate').value || todayISO();
+  analyzingBody = true; bodyError = null; bodySuccess = null;
+  refreshBody();
+  try {
+    const { data, error } = await sb.functions.invoke('analyze-body', {
+      body: { images: bodyPhotos.map(p => p.base64), mime_type: 'image/jpeg', date, notes: bodyNotes || null },
+    });
+    if (error) {
+      let msg = error.message || 'Falha na análise.';
+      if (error.context && typeof error.context.json === 'function') {
+        try { const b = await error.context.json(); if (b && b.error) msg = b.error; } catch(_){}
+      }
+      throw new Error(msg);
+    }
+    if (data && data.error) throw new Error(data.error);
+
+    const assessment = data.assessment;
+    bodyAssessments.unshift(assessment);
+    bodyAssessments.sort((a,b) => b.date.localeCompare(a.date) || (b.created_at||'').localeCompare(a.created_at||''));
+    bodyPhotos = [];
+    bodyNotes = '';
+    expandedAssessmentId = assessment.id;
+    bodySuccess = { date: assessment.date };
+    logEvent('success', 'body_analysis', null, { date: assessment.date });
+  } catch(e) {
+    console.error(e);
+    bodyError = e.message || 'Falha na análise. Tenta novamente.';
+    logEvent('error', 'body_analysis', bodyError);
+  }
+  analyzingBody = false;
+  refreshBody();
+}
+
+async function reanalyzeBody(id){
+  if (reanalyzingAssessmentId) return;
+  const a = findAssessmentById(id);
+  if (!a) return;
+  reanalyzingAssessmentId = id; bodyError = null;
+  refreshBody();
+  try {
+    const { data, error } = await sb.functions.invoke('analyze-body', {
+      body: { assessment_id: id, notes: a.notes || null },
+    });
+    if (error) {
+      let msg = error.message || 'Falha na reanálise.';
+      if (error.context && typeof error.context.json === 'function') {
+        try { const b = await error.context.json(); if (b && b.error) msg = b.error; } catch(_){}
+      }
+      throw new Error(msg);
+    }
+    if (data && data.error) throw new Error(data.error);
+    Object.assign(a, data.assessment);
+    logEvent('success', 'body_reanalysis', null, { date: a.date });
+  } catch(e) {
+    console.error(e);
+    bodyError = e.message || 'Falha na reanálise.';
+    logEvent('error', 'body_reanalysis', bodyError);
+  }
+  reanalyzingAssessmentId = null;
+  refreshBody();
+}
+
+async function deleteBodyAssessment(id){
+  const a = findAssessmentById(id);
+  if (!a) return;
+  bodyAssessments = bodyAssessments.filter(x => x.id !== id);
+  if (expandedAssessmentId === id) expandedAssessmentId = null;
+  refreshBody();
+  try {
+    if (a.photo_paths && a.photo_paths.length) await sb.storage.from('body-photos').remove(a.photo_paths);
+    const { error } = await sb.from('body_assessments').delete().eq('id', id);
+    if (error) throw error;
+  } catch(e) { flashSyncError(e); }
+}
+
+async function toggleAssessmentExpand(id){
+  expandedAssessmentId = expandedAssessmentId === id ? null : id;
+  refreshBody();
+  if (expandedAssessmentId) {
+    const a = findAssessmentById(id);
+    const paths = (a && a.photo_paths || []).filter(p => !signedUrlCache[p]);
+    if (paths.length) {
+      try {
+        const { data, error } = await sb.storage.from('body-photos').createSignedUrls(paths, 3600);
+        if (!error && data) {
+          data.forEach(d => { if (d.signedUrl && d.path) signedUrlCache[d.path] = d.signedUrl; });
+          refreshBody();
+        }
+      } catch(e) { console.warn('signed urls', e); }
+    }
+  }
+}
+
+async function updateAssessmentMetric(id, key, rawValue){
+  const a = findAssessmentById(id);
+  if (!a) return;
+  const trimmed = String(rawValue).trim();
+  const value = trimmed === '' ? null : Math.max(0, Number(trimmed));
+  if (value !== null && !isFinite(value)) return;
+  a[key] = value;
+  refreshBody();
+  try {
+    const { error } = await sb.from('body_assessments').update({ [key]: value }).eq('id', id);
+    if (error) throw error;
+  } catch(e) { flashSyncError(e); }
+}
+
+function selectBodyMetric(key){ selectedBodyMetric = key; refreshBody(); }
+
+function renderBody(){
+  const tabBtn = (key, label, icon) => `
+    <button onclick="switchBodyTab('${key}')"
+      class="range-chip ${bodyTab===key?'active':''} flex-1 border border-neutral-700 rounded-xl py-2 text-xs font-semibold text-slate-300 transition flex items-center justify-center gap-1.5">
+      <i data-lucide="${icon}" class="w-3.5 h-3.5"></i> ${label}
+    </button>`;
+
+  return `
+    <div class="space-y-4 fade-in">
+      <div class="flex items-center gap-2 px-1">
+        <span class="w-9 h-9 rounded-2xl flex items-center justify-center shrink-0" style="background:linear-gradient(135deg,#065f46,#14b8a6);">
+          <i data-lucide="scale" class="w-4 h-4 text-white"></i>
+        </span>
+        <div>
+          <h1 class="text-sm font-bold text-white leading-tight">Avaliação Corporal</h1>
+          <p class="text-[11px] text-slate-500 leading-tight">Prints da Renpho Health, lidos por IA</p>
+        </div>
+      </div>
+
+      <div class="flex gap-2">
+        ${tabBtn('avaliacoes', 'Avaliações', 'clipboard-list')}
+        ${tabBtn('evolucao', 'Evolução', 'trending-up')}
+      </div>
+
+      ${bodyTab === 'avaliacoes' ? renderBodyAvaliacoes() : renderBodyEvolucao()}
+    </div>
+  `;
+}
+
+function renderBodyAvaliacoes(){
+  return `
+    <div class="space-y-4">
+      ${bodySuccess ? `
+        <div class="rounded-2xl border border-emerald-500/40 bg-emerald-500/10 p-4 flex items-start gap-3">
+          <i data-lucide="check-circle-2" class="w-5 h-5 text-emerald-400 shrink-0 mt-0.5"></i>
+          <div class="flex-1 min-w-0">
+            <p class="text-xs font-semibold text-emerald-300">Avaliação registada</p>
+            <p class="text-[11px] text-emerald-200/80 mt-0.5">${formatDatePT(bodySuccess.date)} · a IA leu e comentou os valores abaixo</p>
+          </div>
+        </div>` : ''}
+
+      ${renderBodyUpload()}
+
+      ${bodyAssessments.length ? `
+        <div class="flex items-center gap-2 px-1 pt-1">
+          <i data-lucide="history" class="w-4 h-4 text-[var(--accent)]"></i>
+          <h2 class="text-sm font-semibold text-white">Histórico</h2>
+          <span class="text-[11px] text-slate-500">${bodyAssessments.length}</span>
+        </div>
+        ${bodyAssessments.map(renderAssessmentCard).join('')}
+      ` : `
+        <p class="text-xs text-slate-500 text-center py-4">Ainda não tens avaliações. Envia o teu primeiro print acima.</p>
+      `}
+    </div>
+  `;
+}
+
+function renderBodyUpload(){
+  return `
+    <div class="card rounded-2xl p-4">
+      <div class="flex items-center gap-2 mb-3">
+        <i data-lucide="scan-line" class="w-4 h-4 text-[var(--accent)]"></i>
+        <h2 class="text-sm font-semibold text-white">Nova Avaliação</h2>
+      </div>
+
+      ${bodyPhotos.length ? `
+        <div class="grid grid-cols-3 gap-2 mb-2">
+          ${bodyPhotos.map((p, i) => `
+            <div class="relative aspect-square">
+              <img src="${p.dataUrl}" class="w-full h-full object-cover rounded-xl border border-neutral-800" alt="Print ${i+1}" />
+              <button onclick="removeBodyPhoto(${i})" class="absolute top-1 right-1 bg-neutral-950/80 border border-neutral-700 rounded-full p-1 text-slate-300">
+                <i data-lucide="x" class="w-3.5 h-3.5"></i>
+              </button>
+            </div>
+          `).join('')}
+        </div>
+        <div class="flex items-center justify-between mb-3">
+          <span class="text-[11px] text-slate-500">${bodyPhotos.length} print(s) · máx ${MAX_PHOTOS}</span>
+          <button onclick="clearBodyPhotos()" class="text-[11px] text-slate-500 hover:text-red-400 flex items-center gap-1">
+            <i data-lucide="trash-2" class="w-3.5 h-3.5"></i> Limpar todos
+          </button>
+        </div>
+        ${bodyPhotos.length < MAX_PHOTOS ? `
+          <label class="flex items-center justify-center gap-2 border-2 border-dashed border-[var(--accent)]/40 rounded-xl py-3 text-center cursor-pointer hover:border-[var(--accent)]/70 hover:bg-[var(--accent)]/5 transition mb-3">
+            <input type="file" accept="image/*" multiple class="hidden" onchange="onBodyPhotoSelected(this)" />
+            <i data-lucide="image-plus" class="w-5 h-5 text-[var(--accent)]"></i>
+            <span class="text-xs font-semibold text-[var(--accent)]">Adicionar outro print</span>
+          </label>
+        ` : ''}
+      ` : `
+        <label class="block border-2 border-dashed border-neutral-700 rounded-xl py-8 text-center cursor-pointer hover:border-[var(--accent)]/50 transition mb-3">
+          <input type="file" accept="image/*" multiple class="hidden" onchange="onBodyPhotoSelected(this)" />
+          <i data-lucide="image-plus" class="w-8 h-8 text-slate-600 mx-auto mb-2"></i>
+          <p class="text-xs text-slate-400 font-medium">Escolhe os prints da app Renpho Health</p>
+          <p class="text-[10px] text-slate-600 mt-1">Podes juntar vários ecrãs (resumo, gordura, músculo...) da mesma pesagem</p>
+        </label>
+      `}
+
+      <div class="grid grid-cols-2 gap-2 mb-3">
+        <input id="bodyDate" type="date" value="${bodyDate}" max="${todayISO()}" onchange="bodyDate = this.value"
+          class="w-full bg-neutral-900 border border-neutral-800 rounded-xl px-3 py-2 text-sm text-white outline-none focus:border-[var(--accent)]/60" />
+        <div class="flex items-center justify-center text-[11px] text-slate-500">Data da pesagem</div>
+      </div>
+
+      <div class="mb-3">
+        <label class="text-[11px] text-slate-500 mb-1 block">Observações (opcional) — ex.: "em jejum", "após treino"</label>
+        <textarea id="bodyNotes" rows="2" maxlength="500" placeholder="Contexto da pesagem..."
+          oninput="updateBodyNotes(this.value)"
+          class="w-full bg-neutral-900 border border-neutral-800 rounded-xl px-3 py-2 text-xs text-white placeholder-slate-600 outline-none focus:border-[var(--accent)]/60 resize-none">${esc(bodyNotes)}</textarea>
+      </div>
+
+      ${bodyError ? `<p class="text-[11px] text-red-400 mb-2">${esc(bodyError)}</p>` : ''}
+
+      <button onclick="analyzeBody()" ${(!bodyPhotos.length || analyzingBody) ? 'disabled' : ''}
+        class="w-full bg-[var(--accent)] text-neutral-950 font-bold text-sm rounded-xl py-2.5 flex items-center justify-center gap-1.5 active:scale-[0.98] transition disabled:opacity-40 ${analyzingBody?'analyzing':''}">
+        ${analyzingBody
+          ? '<i data-lucide="loader-2" class="w-4 h-4 animate-spin"></i> A ler com IA...'
+          : `<i data-lucide="sparkles" class="w-4 h-4"></i> Analisar Avaliação${bodyPhotos.length>1?` (${bodyPhotos.length} prints)`:''}`}
+      </button>
+    </div>
+  `;
+}
+
+function renderAssessmentCard(a){
+  const expanded = expandedAssessmentId === a.id;
+  const prev = previousAssessment(a);
+  const reanalyzing = reanalyzingAssessmentId === a.id;
+  const filled = BODY_METRICS.filter(m => a[m.key] !== null && a[m.key] !== undefined);
+
+  // Resumo de destaque (não expandido): peso + gordura + músculo, se existirem.
+  const highlightKeys = ['weight_kg', 'body_fat_pct', 'muscle_mass_kg'];
+  const highlights = highlightKeys
+    .map(k => BODY_METRICS.find(m => m.key === k))
+    .filter(m => a[m.key] !== null && a[m.key] !== undefined)
+    .map(m => `<span class="text-[11px] text-slate-400">${m.label.split(' ')[0]} <span class="text-white font-semibold">${fmtMetric(m, a[m.key])}</span></span>`)
+    .join('<span class="text-slate-700">·</span>');
+
+  const metricRow = (m) => {
+    const v = a[m.key];
+    const pv = prev ? prev[m.key] : null;
+    let delta = '';
+    if (v !== null && v !== undefined && pv !== null && pv !== undefined) {
+      const d = Number(v) - Number(pv);
+      if (Math.abs(d) >= (m.dec === 0 ? 1 : 0.05)) {
+        delta = `<span class="text-[10px] font-semibold ${deltaClass(m, d)}">${d > 0 ? '▲' : '▼'} ${Math.abs(d).toFixed(m.dec)}</span>`;
+      }
+    }
+    return `
+      <div class="flex items-center justify-between gap-2 py-1.5 border-b border-neutral-900 last:border-0">
+        <span class="text-xs text-slate-400 flex items-center gap-1.5"><span class="w-2 h-2 rounded-full shrink-0" style="background:${m.color}"></span>${m.label}</span>
+        <div class="flex items-center gap-2">
+          ${delta}
+          <div class="flex items-center gap-1">
+            <input type="number" step="${m.dec === 0 ? '1' : '0.1'}" min="0" value="${v ?? ''}"
+              onchange="updateAssessmentMetric('${a.id}', '${m.key}', this.value)"
+              class="w-16 bg-neutral-900 border border-neutral-800 rounded-lg px-2 py-1 text-xs text-white text-right outline-none focus:border-[var(--accent)]/60" />
+            <span class="text-[10px] text-slate-500 w-8">${m.unit || ''}</span>
+          </div>
+        </div>
+      </div>`;
+  };
+
+  return `
+    <div class="card rounded-2xl overflow-hidden">
+      <button onclick="toggleAssessmentExpand('${a.id}')" class="w-full flex items-center gap-3 p-3.5 text-left">
+        <span class="w-10 h-10 rounded-xl flex items-center justify-center shrink-0 bg-[var(--accent)]/10 border border-[var(--accent)]/30">
+          <i data-lucide="scale" class="w-5 h-5 text-[var(--accent)]"></i>
+        </span>
+        <div class="flex-1 min-w-0">
+          <p class="text-sm font-semibold text-white">${formatDatePT(a.date)}</p>
+          <p class="text-[11px] mt-0.5 flex items-center gap-1.5 flex-wrap">${highlights || `<span class="text-slate-500">${filled.length} valor(es)</span>`}</p>
+        </div>
+        <i data-lucide="chevron-${expanded ? 'up' : 'down'}" class="w-4 h-4 text-slate-500 shrink-0"></i>
+      </button>
+
+      ${expanded ? `
+        <div class="px-3.5 pb-3.5 space-y-3">
+          ${a.ai_summary ? `
+            <div class="rounded-xl bg-[var(--accent)]/5 border border-[var(--accent)]/20 p-3">
+              <div class="flex items-center gap-1.5 mb-1">
+                <i data-lucide="sparkles" class="w-3.5 h-3.5 text-[var(--accent)]"></i>
+                <span class="text-[11px] font-semibold text-[var(--accent)]">Avaliação da IA</span>
+              </div>
+              <p class="text-xs text-slate-300 leading-relaxed md-body">${renderMarkdown(a.ai_summary)}</p>
+            </div>` : ''}
+
+          <div>
+            ${BODY_METRICS.map(metricRow).join('')}
+          </div>
+
+          ${(a.photo_paths && a.photo_paths.length) ? `
+            <div class="grid grid-cols-3 gap-2">
+              ${a.photo_paths.map(p => signedUrlCache[p]
+                ? `<a href="${signedUrlCache[p]}" target="_blank" rel="noopener"><img src="${signedUrlCache[p]}" class="w-full aspect-square object-cover rounded-lg border border-neutral-800" alt="Print" /></a>`
+                : `<div class="w-full aspect-square rounded-lg bg-neutral-900 border border-neutral-800 flex items-center justify-center"><i data-lucide="loader-2" class="w-4 h-4 text-slate-600 animate-spin"></i></div>`
+              ).join('')}
+            </div>` : ''}
+
+          ${a.notes ? `<p class="text-[11px] text-slate-500"><span class="text-slate-400 font-medium">Obs.:</span> ${esc(a.notes)}</p>` : ''}
+
+          <div class="flex items-center gap-2 pt-1">
+            <button onclick="reanalyzeBody('${a.id}')" ${(reanalyzing || !(a.photo_paths||[]).length) ? 'disabled' : ''}
+              class="flex-1 border border-neutral-700 hover:border-[var(--accent)]/50 text-slate-300 text-xs font-semibold rounded-xl py-2 flex items-center justify-center gap-1.5 transition disabled:opacity-40 ${reanalyzing?'analyzing':''}">
+              ${reanalyzing
+                ? '<i data-lucide="loader-2" class="w-3.5 h-3.5 animate-spin"></i> A reanalisar...'
+                : '<i data-lucide="refresh-cw" class="w-3.5 h-3.5"></i> Reanalisar'}
+            </button>
+            <button onclick="deleteBodyAssessment('${a.id}')"
+              class="border border-red-500/30 text-red-400 hover:bg-red-500/10 text-xs font-semibold rounded-xl px-3 py-2 flex items-center justify-center gap-1.5 transition">
+              <i data-lucide="trash-2" class="w-3.5 h-3.5"></i>
+            </button>
+          </div>
+        </div>
+      ` : ''}
+    </div>
+  `;
+}
+
+function renderBodyEvolucao(){
+  if (!bodyAssessments.length) {
+    return `<p class="text-xs text-slate-500 text-center py-8">Regista a tua primeira avaliação para veres a evolução.</p>`;
+  }
+  const m = BODY_METRICS.find(x => x.key === selectedBodyMetric) || BODY_METRICS[0];
+
+  // Última e primeira leitura (com valor) da métrica selecionada, para o resumo.
+  const withVal = bodyAssessments.filter(a => a[m.key] !== null && a[m.key] !== undefined);
+  const latest = withVal[0];
+  const oldest = withVal[withVal.length - 1];
+  let deltaTotal = '';
+  if (latest && oldest && latest !== oldest) {
+    const d = Number(latest[m.key]) - Number(oldest[m.key]);
+    if (Math.abs(d) >= (m.dec === 0 ? 1 : 0.05)) {
+      deltaTotal = `<span class="text-xs font-semibold ${deltaClass(m, d)}">${d > 0 ? '▲' : '▼'} ${Math.abs(d).toFixed(m.dec)} ${m.unit}</span> <span class="text-[11px] text-slate-500">desde ${formatDatePT(oldest.date)}</span>`;
+    }
+  }
+
+  const chips = BODY_METRICS.map(x => `
+    <button onclick="selectBodyMetric('${x.key}')"
+      class="shrink-0 border rounded-full px-3 py-1.5 text-[11px] font-medium transition ${selectedBodyMetric===x.key ? 'text-neutral-950 border-transparent' : 'text-slate-300 border-neutral-700'}"
+      style="${selectedBodyMetric===x.key ? `background:${x.color};` : ''}">
+      ${x.label}
+    </button>
+  `).join('');
+
+  // Últimos valores de todas as métricas (leitura mais recente que tem cada uma).
+  const latestGrid = BODY_METRICS.map(x => {
+    const a = bodyAssessments.find(as => as[x.key] !== null && as[x.key] !== undefined);
+    return `
+      <div class="card rounded-xl p-3">
+        <p class="text-[10px] text-slate-500 truncate">${x.label}</p>
+        <p class="text-sm font-bold text-white mt-0.5">${a ? fmtMetric(x, a[x.key]) : '—'}</p>
+      </div>`;
+  }).join('');
+
+  return `
+    <div class="space-y-4">
+      <div class="flex gap-2 overflow-x-auto no-scrollbar pb-1">${chips}</div>
+
+      <div class="card rounded-2xl p-4">
+        <div class="flex items-center justify-between gap-2 mb-1">
+          <div class="flex items-center gap-2">
+            <span class="w-2.5 h-2.5 rounded-full" style="background:${m.color}"></span>
+            <h2 class="text-sm font-semibold text-white">${m.label}</h2>
+          </div>
+          ${latest ? `<span class="text-lg font-bold text-white">${fmtMetric(m, latest[m.key])}</span>` : ''}
+        </div>
+        <div class="mb-3">${deltaTotal || `<span class="text-[11px] text-slate-500">${withVal.length} leitura(s)</span>`}</div>
+        ${withVal.length >= 1 ? `<canvas id="bodyChart" height="190"></canvas>` : `<p class="text-xs text-slate-500">Sem leituras desta métrica ainda.</p>`}
+      </div>
+
+      <div class="flex items-center gap-2 px-1">
+        <i data-lucide="list" class="w-4 h-4 text-[var(--accent)]"></i>
+        <h2 class="text-sm font-semibold text-white">Valores mais recentes</h2>
+      </div>
+      <div class="grid grid-cols-3 gap-2">${latestGrid}</div>
+    </div>
+  `;
+}
+
+function renderBodyChart(){
+  const canvas = document.getElementById('bodyChart');
+  if (!canvas) return;
+  if (bodyChart) { bodyChart.destroy(); bodyChart = null; }
+
+  const m = BODY_METRICS.find(x => x.key === selectedBodyMetric) || BODY_METRICS[0];
+  // Ordem cronológica ascendente, apenas avaliações com valor para a métrica.
+  const points = bodyAssessments
+    .filter(a => a[m.key] !== null && a[m.key] !== undefined)
+    .slice()
+    .sort((a,b) => a.date.localeCompare(b.date));
+  if (!points.length) return;
+
+  Chart.defaults.color = theme === 'light' ? '#475569' : '#a1a1aa';
+  bodyChart = new Chart(canvas, {
+    type: 'line',
+    data: {
+      labels: points.map(a => a.date.slice(8,10) + '/' + a.date.slice(5,7)),
+      datasets: [{
+        label: `${m.label}${m.unit ? ' (' + m.unit + ')' : ''}`,
+        data: points.map(a => Number(a[m.key])),
+        borderColor: m.color,
+        backgroundColor: hexToRgba(m.color, 0.15),
+        pointBackgroundColor: m.color,
+        pointRadius: points.length > 20 ? 0 : 3,
+        borderWidth: 2,
+        tension: 0.25,
+        fill: true,
+      }],
+    },
+    options: {
+      responsive: true,
+      plugins: { legend: { labels: { boxWidth: 10, font: { size: 10 } } } },
+      scales: {
+        y: { beginAtZero: false, grid: { color: theme === 'light' ? 'rgba(148,163,184,0.35)' : 'rgba(63,63,70,0.4)' } },
+        x: { grid: { display: false } },
+      },
+    },
+  });
 }
 
 /* ============================= DASHBOARD ============================= */
@@ -2473,6 +3034,13 @@ document.addEventListener('DOMContentLoaded', () => {
       coachMessages = [];
       coachLoading  = false;
       coachError    = null;
+      bodyAssessments = [];
+      bodyPhotos = [];
+      bodyTab = 'avaliacoes';
+      bodyNotes = '';
+      expandedAssessmentId = null;
+      bodySuccess = null;
+      bodyError = null;
       showAdminPanel = false;
       adminData = null;
       adminSelectedUserId = null;

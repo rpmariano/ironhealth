@@ -32,6 +32,24 @@ alter table profiles enable row level security;
 create policy "own profile" on profiles for all
   using (auth.uid() = id) with check (auth.uid() = id);
 
+-- objetivos do módulo "Corpo" — um por métrica de body_assessments, todos
+-- opcionais. Adicionados depois da criação da tabela: idempotente para BDs
+-- já existentes.
+alter table profiles
+  add column if not exists goal_weight_kg numeric,
+  add column if not exists goal_bmi numeric,
+  add column if not exists goal_body_fat_pct numeric,
+  add column if not exists goal_skeletal_muscle_pct numeric,
+  add column if not exists goal_muscle_mass_kg numeric,
+  add column if not exists goal_body_water_pct numeric,
+  add column if not exists goal_protein_pct numeric,
+  add column if not exists goal_bone_mass_kg numeric,
+  add column if not exists goal_bmr_kcal numeric,
+  add column if not exists goal_visceral_fat numeric,
+  add column if not exists goal_subcutaneous_fat_pct numeric,
+  add column if not exists goal_metabolic_age numeric,
+  add column if not exists goal_lean_body_mass_kg numeric;
+
 -- perfil criado automaticamente no signup
 create or replace function public.handle_new_user()
 returns trigger language plpgsql security definer set search_path = public as $$

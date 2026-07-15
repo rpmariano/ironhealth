@@ -403,9 +403,11 @@ let calendarSelectedDate = todayISO();
 let calendarCache = {};       // 'YYYY-MM' -> refeições desse mês (meses != atual)
 let calendarLoading = false;
 
-/* ===== Avaliação Corporal (vertical "Corpo") ===== */
+/* ===== Avaliação Corporal (vertical "Corpo") — mesma lógica da Nutrição:
+   Dashboard/Calendário no nav inferior, Avaliar acedido a partir do
+   Calendário (ou do FAB), nunca pelo nav. ===== */
 let bodyAssessments = [];      // [{ ...avaliação }] ordenadas por data desc
-let bodyTab = 'avaliacoes';    // 'avaliacoes' | 'evolucao'
+let bodyTab = 'dashboard';     // 'dashboard' | 'avaliar' | 'calendario'
 let bodyPhotos = [];           // [{ dataUrl, base64 }] prints comprimidos prontos a enviar
 let bodyDate = todayISO();     // data pré-preenchida da nova avaliação
 let bodyNotes = '';            // observação livre antes da análise
@@ -414,8 +416,10 @@ let bodyError = null;
 let bodySuccess = null;        // { date } — confirmação após registar
 let expandedAssessmentId = null;
 let reanalyzingAssessmentId = null;
-let selectedBodyMetric = 'weight_kg'; // métrica mostrada no gráfico de evolução
+let selectedBodyMetric = 'weight_kg'; // métrica mostrada no gráfico do dashboard
 let bodyChart = null;
+let bodyCalendarViewMonth = todayISO().slice(0,7); // 'YYYY-MM' do mês visível
+let bodyCalendarSelectedDate = todayISO();
 
 /* ============================= HELPERS ============================= */
 function todayISO(){ return new Date().toISOString().slice(0,10); }
@@ -833,14 +837,22 @@ async function saveProfileFromForm(){
   const gender = document.getElementById('pfGender').value;
   const updates = {
     display_name: name || state.profile.display_name,
+    gender: gender || null,
+    height_cm: get('pfHeight') > 0 ? get('pfHeight') : null,
+    weight_kg: get('pfWeight') > 0 ? get('pfWeight') : null,
     calorie_goal: get('pfCal') > 0 ? get('pfCal') : state.profile.calorie_goal,
     protein_goal: get('pfPro') > 0 ? get('pfPro') : state.profile.protein_goal,
     carbs_goal: get('pfCarb') > 0 ? get('pfCarb') : state.profile.carbs_goal,
     fat_goal: get('pfFat') > 0 ? get('pfFat') : state.profile.fat_goal,
-    height_cm: get('pfHeight') > 0 ? get('pfHeight') : null,
-    weight_kg: get('pfWeight') > 0 ? get('pfWeight') : null,
-    gender: gender || null,
   };
+  // Objetivos do módulo Corpo — um por métrica, todos opcionais (campo vazio
+  // limpa o objetivo em vez de manter o valor anterior).
+  BODY_METRICS.forEach(m => {
+    const el = document.getElementById('pfGoal_' + m.key);
+    if (!el) return;
+    const raw = el.value.trim();
+    updates['goal_' + m.key] = raw === '' ? null : Math.max(0, Number(raw));
+  });
   Object.assign(state.profile, updates);
   render();
   try {
@@ -1154,6 +1166,8 @@ function switchVertical(vertical){
   activeVertical = vertical;
   analyzeError = null;
   analyzeSuccess = null;
+  bodyError = null;
+  bodySuccess = null;
   abandonManualMealSession();
   // Registar e Perfil são acedidos por atalhos dedicados, não pelo nav inferior
   // da Nutrição (só Dashboard/Calendário) — entrar na vertical a partir daí
@@ -1162,6 +1176,9 @@ function switchVertical(vertical){
     activeTab = 'dashboard';
   }
   if (vertical === 'nutricao' && activeTab === 'calendario') ensureCalendarMonthLoaded(calendarViewMonth);
+  // Avaliar (Corpo) segue a mesma regra do Registar — só se acede a partir do
+  // Calendário/FAB, nunca ficando "preso" lá ao entrar na vertical de outro sítio.
+  if (vertical === 'corpo' && bodyTab === 'avaliar') bodyTab = 'dashboard';
   render();
   pushNavState();
 }
@@ -1202,12 +1219,7 @@ function fabCreateMeal(){
 }
 function fabCreateAssessment(){
   closeFab();
-  activeVertical = 'corpo';
-  bodyTab = 'avaliacoes';
-  bodyError = null;
-  bodySuccess = null;
-  abandonManualMealSession();
-  render();
+  goToAvaliarForDate(todayISO());
 }
 document.addEventListener('click', (e) => {
   const fabRoot = document.getElementById('fabRoot');
@@ -1223,6 +1235,18 @@ function goToRegistarForDate(dateIso){
   analyzeSuccess = null;
   abandonManualMealSession();
   selectedMealType = suggestMealTypeByTime();
+  render();
+  pushNavState();
+}
+
+// Entra em Avaliar (vertical Corpo) com a data do dia selecionado já preenchida.
+// Espelha goToRegistarForDate: só se acede a partir do Calendário ou do FAB.
+function goToAvaliarForDate(dateIso){
+  bodyDate = dateIso;
+  activeVertical = 'corpo';
+  bodyTab = 'avaliar';
+  bodyError = null;
+  bodySuccess = null;
   render();
   pushNavState();
 }
@@ -1327,6 +1351,35 @@ function viewInCalendar(dateIso){
   ensureCalendarMonthLoaded(calendarViewMonth);
   render();
   pushNavState();
+}
+
+// Volta ao Calendário (vertical Corpo) já no dia da avaliação registada.
+// Espelha viewInCalendar — sem necessidade de "ensureLoaded" porque
+// bodyAssessments já contém o histórico completo do utilizador.
+function viewInBodyCalendar(dateIso){
+  bodyCalendarSelectedDate = dateIso;
+  bodyCalendarViewMonth = dateIso.slice(0,7);
+  activeVertical = 'corpo';
+  bodyTab = 'calendario';
+  bodySuccess = null;
+  render();
+  pushNavState();
+}
+
+function changeBodyCalendarMonth(delta){
+  bodyCalendarViewMonth = shiftMonthKey(bodyCalendarViewMonth, delta);
+  render();
+}
+
+function selectBodyCalendarDay(dateIso){
+  bodyCalendarSelectedDate = dateIso;
+  render();
+}
+
+// 'has' (há avaliação nesse dia) ou 'none' (sem registo) — equivalente
+// simplificado do dayNutrientStatus da Nutrição (Corpo não tem metas por dia).
+function dayBodyStatus(dateIso){
+  return bodyAssessments.some(a => a.date === dateIso) ? 'has' : 'none';
 }
 
 function renderVerticalStrip(){
@@ -1448,16 +1501,40 @@ function render(){
       if (!gymScreen && gymTab === 'dashboard') requestAnimationFrame(renderGymCharts);
       return;
     }
-    // Início / Corpo / Corrida → placeholder simples, sem nav.
+    if (activeVertical === 'corpo') {
+      // Mesma lógica da Nutrição: nav próprio (Dashboard/Calendário) sempre
+      // visível; Avaliar é acedido a partir do Calendário/FAB, nunca pelo nav,
+      // mas mantém o nav visível com "Calendário" em destaque (tal como
+      // Registar faz na Nutrição) em vez de o esconder.
+      nav.classList.remove('hidden');
+      nav.innerHTML = CORPO_NAV_HTML;
+      main.classList.remove('overflow-hidden', 'pb-4', 'flex', 'flex-col');
+      main.classList.add('overflow-y-auto', 'pb-28');
+      fabRoot.style.bottom = '92px';
+      const navHighlight = bodyTab === 'avaliar' ? 'calendario' : bodyTab;
+      document.querySelectorAll('.tab-btn').forEach(btn => {
+        btn.classList.toggle('active', btn.dataset.tab === navHighlight);
+      });
+      // Já estamos no próprio ecrã de criação — o atalho seria redundante.
+      if (bodyTab === 'avaliar') { closeFab(); fabRoot.classList.add('hidden'); }
+      else fabRoot.classList.remove('hidden');
+
+      if (bodyTab === 'dashboard') main.innerHTML = renderBodyDashboard();
+      else if (bodyTab === 'avaliar') main.innerHTML = renderBodyAvaliar();
+      else if (bodyTab === 'calendario') main.innerHTML = renderBodyCalendario();
+
+      if (window.lucide) lucide.createIcons();
+      if (bodyTab === 'dashboard') requestAnimationFrame(renderBodyChart);
+      return;
+    }
+    // Início / Corrida → placeholder simples, sem nav.
     nav.classList.add('hidden');
     fabRoot.style.bottom = '20px';
     main.classList.remove('overflow-hidden', 'pb-4', 'flex', 'flex-col');
     main.classList.add('overflow-y-auto', 'pb-28');
     if (activeVertical === 'home') main.innerHTML = renderHome();
-    else if (activeVertical === 'corpo') main.innerHTML = renderBody();
     else main.innerHTML = renderVerticalPlaceholder(VERTICALS.find(v => v.key === activeVertical));
     if (window.lucide) lucide.createIcons();
-    if (activeVertical === 'corpo' && bodyTab === 'evolucao') requestAnimationFrame(renderBodyChart);
     return;
   }
 
@@ -1635,7 +1712,17 @@ function classificationBadge(assessment, key, extra){
 function switchBodyTab(tab){
   bodyTab = tab;
   bodyError = null;
+  bodySuccess = null;
   render();
+  pushNavState();
+}
+
+// Dispatcher do conteúdo da vertical Corpo consoante o separador ativo —
+// espelha o if/else de dashboard/registar/calendario da Nutrição.
+function renderBodyTabContent(){
+  if (bodyTab === 'avaliar') return renderBodyAvaliar();
+  if (bodyTab === 'calendario') return renderBodyCalendario();
+  return renderBodyDashboard();
 }
 
 // Atualização in-place do conteúdo da vertical Corpo (sem tocar no header/strip),
@@ -1643,9 +1730,9 @@ function switchBodyTab(tab){
 function refreshBody(){
   const main = document.getElementById('tab-content');
   if (!main) return;
-  main.innerHTML = renderBody();
+  main.innerHTML = renderBodyTabContent();
   if (window.lucide) lucide.createIcons();
-  if (bodyTab === 'evolucao') requestAnimationFrame(renderBodyChart);
+  if (bodyTab === 'dashboard') requestAnimationFrame(renderBodyChart);
 }
 
 async function onBodyPhotoSelected(input){
@@ -1778,59 +1865,24 @@ async function updateAssessmentMetric(id, key, rawValue){
 
 function selectBodyMetric(key){ selectedBodyMetric = key; refreshBody(); }
 
-function renderBody(){
-  const tabBtn = (key, label, icon) => `
-    <button onclick="switchBodyTab('${key}')"
-      class="range-chip ${bodyTab===key?'active':''} flex-1 border border-neutral-700 rounded-xl py-2 text-xs font-semibold text-slate-300 transition flex items-center justify-center gap-1.5">
-      <i data-lucide="${icon}" class="w-3.5 h-3.5"></i> ${label}
-    </button>`;
-
+// Ecrã "Avaliar" — só se chega aqui a partir do Calendário/FAB, nunca do nav
+// inferior. Espelha renderRegistar: banner de sucesso com link para o
+// Calendário, seguido do formulário de upload.
+function renderBodyAvaliar(){
   return `
     <div class="space-y-4 fade-in">
-      <div class="flex items-center gap-2 px-1">
-        <span class="w-9 h-9 rounded-2xl flex items-center justify-center shrink-0" style="background:linear-gradient(135deg,#065f46,#14b8a6);">
-          <i data-lucide="scale" class="w-4 h-4 text-white"></i>
-        </span>
-        <div>
-          <h1 class="text-sm font-bold text-white leading-tight">Avaliação Corporal</h1>
-          <p class="text-[11px] text-slate-500 leading-tight">Prints da Renpho Health, lidos por IA</p>
-        </div>
-      </div>
 
-      <div class="flex gap-2">
-        ${tabBtn('avaliacoes', 'Avaliações', 'clipboard-list')}
-        ${tabBtn('evolucao', 'Evolução', 'trending-up')}
-      </div>
-
-      ${bodyTab === 'avaliacoes' ? renderBodyAvaliacoes() : renderBodyEvolucao()}
-    </div>
-  `;
-}
-
-function renderBodyAvaliacoes(){
-  return `
-    <div class="space-y-4">
       ${bodySuccess ? `
-        <div class="rounded-2xl border border-emerald-500/40 bg-emerald-500/10 p-4 flex items-start gap-3">
-          <i data-lucide="check-circle-2" class="w-5 h-5 text-emerald-400 shrink-0 mt-0.5"></i>
-          <div class="flex-1 min-w-0">
-            <p class="text-xs font-semibold text-emerald-300">Avaliação registada</p>
-            <p class="text-[11px] text-emerald-200/80 mt-0.5">${formatDatePT(bodySuccess.date)} · a IA leu e comentou os valores abaixo</p>
-          </div>
-        </div>` : ''}
+      <div class="rounded-2xl border border-emerald-500/40 bg-emerald-500/10 p-4 flex items-start gap-3">
+        <i data-lucide="check-circle-2" class="w-5 h-5 text-emerald-400 shrink-0 mt-0.5"></i>
+        <div class="flex-1 min-w-0">
+          <p class="text-xs font-semibold text-emerald-300">Avaliação registada</p>
+          <p class="text-[11px] text-emerald-200/80 mt-0.5">${formatDatePT(bodySuccess.date)} · a IA leu e comentou os valores</p>
+          <button onclick="viewInBodyCalendar('${bodySuccess.date}')" class="text-[11px] text-emerald-300 font-semibold underline mt-1.5">Ver no Calendário</button>
+        </div>
+      </div>` : ''}
 
       ${renderBodyUpload()}
-
-      ${bodyAssessments.length ? `
-        <div class="flex items-center gap-2 px-1 pt-1">
-          <i data-lucide="history" class="w-4 h-4 text-[var(--accent)]"></i>
-          <h2 class="text-sm font-semibold text-white">Histórico</h2>
-          <span class="text-[11px] text-slate-500">${bodyAssessments.length}</span>
-        </div>
-        ${bodyAssessments.map(renderAssessmentCard).join('')}
-      ` : `
-        <p class="text-xs text-slate-500 text-center py-4">Ainda não tens avaliações. Envia o teu primeiro print acima.</p>
-      `}
     </div>
   `;
 }
@@ -2000,9 +2052,18 @@ function renderAssessmentCard(a){
   `;
 }
 
-function renderBodyEvolucao(){
+function renderBodyDashboard(){
   if (!bodyAssessments.length) {
-    return `<p class="text-xs text-slate-500 text-center py-8">Regista a tua primeira avaliação para veres a evolução.</p>`;
+    return `
+      <div class="min-h-[50vh] flex flex-col items-center justify-center text-center px-6 fade-in">
+        <span class="w-16 h-16 rounded-3xl flex items-center justify-center mb-4" style="background:linear-gradient(135deg,#065f46,#14b8a6);">
+          <i data-lucide="scale" class="w-7 h-7 text-white"></i>
+        </span>
+        <p class="text-xs text-slate-500 max-w-xs leading-relaxed">Ainda não tens avaliações. Vai ao Calendário para enviar o teu primeiro print da Renpho Health.</p>
+        <button onclick="switchBodyTab('calendario')" class="mt-4 bg-[var(--accent)] text-neutral-950 font-bold text-xs rounded-xl px-4 py-2.5 flex items-center gap-1.5 active:scale-[0.98] transition">
+          <i data-lucide="calendar-days" class="w-4 h-4"></i> Ir para o Calendário
+        </button>
+      </div>`;
   }
   const m = BODY_METRICS.find(x => x.key === selectedBodyMetric) || BODY_METRICS[0];
 
@@ -2063,6 +2124,85 @@ function renderBodyEvolucao(){
   `;
 }
 
+// Calendário da vertical Corpo — espelha renderCalendario da Nutrição.
+// Não precisa de cache/carregamento por mês porque bodyAssessments já contém
+// o histórico completo do utilizador (dataset muito mais pequeno que meals).
+function renderBodyCalendario(){
+  const [y, m] = bodyCalendarViewMonth.split('-').map(Number);
+  const firstOfMonth = new Date(y, m - 1, 1);
+  const daysInMonth = new Date(y, m, 0).getDate();
+  const firstWeekday = (firstOfMonth.getDay() + 6) % 7; // 0 = Segunda
+  const monthLabel = `${PT_MONTHS[m-1]} ${y}`;
+  const todayIso = todayISO();
+
+  const cells = Array(firstWeekday).fill(null);
+  for (let d = 1; d <= daysInMonth; d++) {
+    cells.push(`${y}-${String(m).padStart(2,'0')}-${String(d).padStart(2,'0')}`);
+  }
+
+  return `
+    <div class="space-y-4 fade-in">
+      <button onclick="goToAvaliarForDate(bodyCalendarSelectedDate)"
+        class="w-full bg-[var(--accent)] text-neutral-950 font-bold text-sm rounded-2xl py-3.5 flex items-center justify-center gap-2 active:scale-[0.98] transition shadow-lg">
+        <i data-lucide="scan-line" class="w-5 h-5"></i> Nova Avaliação
+      </button>
+
+      <div class="card rounded-2xl p-4">
+        <div class="flex items-center justify-between mb-4">
+          <button onclick="changeBodyCalendarMonth(-1)" class="p-2 text-slate-400 hover:text-white">
+            <i data-lucide="chevron-left" class="w-5 h-5"></i>
+          </button>
+          <h2 class="text-sm font-bold text-white capitalize">${monthLabel}</h2>
+          <button onclick="changeBodyCalendarMonth(1)" class="p-2 text-slate-400 hover:text-white">
+            <i data-lucide="chevron-right" class="w-5 h-5"></i>
+          </button>
+        </div>
+
+        <div class="grid grid-cols-7 gap-1 mb-1">
+          ${['Seg','Ter','Qua','Qui','Sex','Sáb','Dom'].map(d => `<div class="text-center text-[10px] text-slate-600 font-semibold">${d}</div>`).join('')}
+        </div>
+
+        <div class="grid grid-cols-7 gap-1">
+          ${cells.map(dateIso => {
+            if (!dateIso) return `<div></div>`;
+            const status = dayBodyStatus(dateIso);
+            const isToday = dateIso === todayIso;
+            const isSelected = dateIso === bodyCalendarSelectedDate;
+            const dotColor = status === 'has' ? 'bg-emerald-500' : 'bg-neutral-700';
+            const dayNum = Number(dateIso.slice(8,10));
+            return `
+              <button onclick="selectBodyCalendarDay('${dateIso}')"
+                class="aspect-square flex flex-col items-center justify-center rounded-xl text-xs transition
+                  ${isSelected ? 'bg-[var(--accent)] text-neutral-950 font-bold' : isToday ? 'border border-[var(--accent)]/60 text-white' : 'text-slate-300 hover:bg-neutral-800'}">
+                ${dayNum}
+                <span class="w-1.5 h-1.5 rounded-full mt-0.5 ${isSelected ? 'bg-neutral-950' : dotColor}"></span>
+              </button>
+            `;
+          }).join('')}
+        </div>
+
+        <div class="flex flex-wrap items-center gap-x-3 gap-y-1 mt-4 pt-3 border-t border-neutral-800 text-[10px] text-slate-500">
+          <span class="flex items-center gap-1"><span class="w-2 h-2 rounded-full bg-emerald-500"></span> Avaliação registada</span>
+          <span class="flex items-center gap-1"><span class="w-2 h-2 rounded-full bg-neutral-700"></span> Sem registo</span>
+        </div>
+      </div>
+
+      <div class="space-y-3">
+        <h2 class="text-xs font-semibold text-slate-500 uppercase tracking-wide px-1">${formatDatePT(bodyCalendarSelectedDate)}</h2>
+        ${renderBodyCalendarDayAssessments()}
+      </div>
+    </div>
+  `;
+}
+
+function renderBodyCalendarDayAssessments(){
+  const dayAssessments = bodyAssessments
+    .filter(a => a.date === bodyCalendarSelectedDate)
+    .sort((a,b) => (a.created_at||'').localeCompare(b.created_at||''));
+  if (dayAssessments.length === 0) return `<p class="text-xs text-slate-500 px-1">Sem avaliações registadas neste dia.</p>`;
+  return dayAssessments.map(renderAssessmentCard).join('');
+}
+
 function renderBodyChart(){
   const canvas = document.getElementById('bodyChart');
   if (!canvas) return;
@@ -2115,6 +2255,20 @@ const NUTRITION_NAV_HTML = `
         <span class="tab-dot w-1 h-1 rounded-full bg-[var(--accent)] opacity-0"></span>
       </button>
       <button onclick="switchTab('calendario')" data-tab="calendario" class="tab-btn flex flex-col items-center gap-1 py-2.5 text-slate-500 text-[11px] font-medium">
+        <i data-lucide="calendar-days" class="w-5 h-5"></i>Calendário
+        <span class="tab-dot w-1 h-1 rounded-full bg-[var(--accent)] opacity-0"></span>
+      </button>
+    </div>`;
+
+// Nav inferior da vertical Corpo — mesma estrutura do NUTRITION_NAV_HTML
+// (Dashboard/Calendário; Avaliar só se acede a partir do Calendário/FAB).
+const CORPO_NAV_HTML = `
+    <div class="max-w-md mx-auto bg-neutral-900/95 backdrop-blur border-t border-neutral-800 grid grid-cols-2">
+      <button onclick="switchBodyTab('dashboard')" data-tab="dashboard" class="tab-btn flex flex-col items-center gap-1 py-2.5 text-slate-500 text-[11px] font-medium">
+        <i data-lucide="layout-dashboard" class="w-5 h-5"></i>Dashboard
+        <span class="tab-dot w-1 h-1 rounded-full bg-[var(--accent)] opacity-0"></span>
+      </button>
+      <button onclick="switchBodyTab('calendario')" data-tab="calendario" class="tab-btn flex flex-col items-center gap-1 py-2.5 text-slate-500 text-[11px] font-medium">
         <i data-lucide="calendar-days" class="w-5 h-5"></i>Calendário
         <span class="tab-dot w-1 h-1 rounded-full bg-[var(--accent)] opacity-0"></span>
       </button>
@@ -3676,7 +3830,7 @@ function renderPerfil(){
       <div class="card rounded-2xl p-4">
         <div class="flex items-center gap-2 mb-3">
           <i data-lucide="user" class="w-4 h-4 text-[var(--accent)]"></i>
-          <h2 class="text-sm font-semibold text-white">O meu Perfil</h2>
+          <h2 class="text-sm font-semibold text-white">Pessoal</h2>
         </div>
         <div class="space-y-2">
           <div>
@@ -3684,54 +3838,79 @@ function renderPerfil(){
             <input id="pfName" type="text" value="${esc(p.display_name||'')}"
               class="w-full bg-neutral-900 border border-neutral-800 rounded-xl px-3 py-2 text-sm text-white outline-none focus:border-[var(--accent)]/60" />
           </div>
-          <div class="grid grid-cols-3 gap-2">
-            <div>
-              <label class="text-[11px] text-slate-500">Altura (cm)</label>
-              <input id="pfHeight" type="number" min="1" value="${p.height_cm||''}"
-                class="w-full bg-neutral-900 border border-neutral-800 rounded-xl px-3 py-2 text-sm text-white outline-none focus:border-[var(--accent)]/60" />
-            </div>
-            <div>
-              <label class="text-[11px] text-slate-500">Peso (kg)</label>
-              <input id="pfWeight" type="number" min="1" step="0.1" value="${p.weight_kg||''}"
-                class="w-full bg-neutral-900 border border-neutral-800 rounded-xl px-3 py-2 text-sm text-white outline-none focus:border-[var(--accent)]/60" />
-            </div>
-            <div>
-              <label class="text-[11px] text-slate-500">Género</label>
-              <select id="pfGender"
-                class="w-full bg-neutral-900 border border-neutral-800 rounded-xl px-2 py-2 text-sm text-white outline-none focus:border-[var(--accent)]/60">
-                <option value="" ${!p.gender?'selected':''}>–</option>
-                <option value="F" ${p.gender==='F'?'selected':''}>Fem</option>
-                <option value="M" ${p.gender==='M'?'selected':''}>Mas</option>
-              </select>
-            </div>
+          <div>
+            <label class="text-[11px] text-slate-500">Género</label>
+            <select id="pfGender"
+              class="w-full bg-neutral-900 border border-neutral-800 rounded-xl px-2 py-2 text-sm text-white outline-none focus:border-[var(--accent)]/60">
+              <option value="" ${!p.gender?'selected':''}>–</option>
+              <option value="F" ${p.gender==='F'?'selected':''}>Feminino</option>
+              <option value="M" ${p.gender==='M'?'selected':''}>Masculino</option>
+            </select>
           </div>
-          <div class="grid grid-cols-2 gap-2">
-            <div>
-              <label class="text-[11px] text-slate-500">Meta calorias (kcal/dia)</label>
-              <input id="pfCal" type="number" min="1" value="${p.calorie_goal||2000}"
-                class="w-full bg-neutral-900 border border-neutral-800 rounded-xl px-3 py-2 text-sm text-white outline-none focus:border-[var(--accent)]/60" />
-            </div>
-            <div>
-              <label class="text-[11px] text-slate-500">Meta proteína (g/dia)</label>
-              <input id="pfPro" type="number" min="1" value="${p.protein_goal||150}"
-                class="w-full bg-neutral-900 border border-neutral-800 rounded-xl px-3 py-2 text-sm text-white outline-none focus:border-[var(--accent)]/60" />
-            </div>
-            <div>
-              <label class="text-[11px] text-slate-500">Meta hidratos (g/dia)</label>
-              <input id="pfCarb" type="number" min="1" value="${p.carbs_goal||200}"
-                class="w-full bg-neutral-900 border border-neutral-800 rounded-xl px-3 py-2 text-sm text-white outline-none focus:border-[var(--accent)]/60" />
-            </div>
-            <div>
-              <label class="text-[11px] text-slate-500">Meta gordura (g/dia)</label>
-              <input id="pfFat" type="number" min="1" value="${p.fat_goal||70}"
-                class="w-full bg-neutral-900 border border-neutral-800 rounded-xl px-3 py-2 text-sm text-white outline-none focus:border-[var(--accent)]/60" />
-            </div>
-          </div>
-          <p id="pfSaved" class="hidden text-[11px] text-emerald-400 flex items-center gap-1"><i data-lucide="check" class="w-3.5 h-3.5"></i> Guardado.</p>
-          <button onclick="saveProfileFromForm()" class="w-full bg-[var(--accent)] text-neutral-950 font-bold text-sm rounded-xl py-2.5 flex items-center justify-center gap-1.5 active:scale-[0.98] transition">
-            <i data-lucide="save" class="w-4 h-4"></i> Guardar Metas
-          </button>
         </div>
+      </div>
+
+      <div class="card rounded-2xl p-4">
+        <div class="flex items-center gap-2 mb-3">
+          <i data-lucide="scale" class="w-4 h-4 text-[var(--accent)]"></i>
+          <h2 class="text-sm font-semibold text-white">Avaliação Corporal</h2>
+        </div>
+        <div class="grid grid-cols-2 gap-2 mb-3">
+          <div>
+            <label class="text-[11px] text-slate-500">Altura (cm)</label>
+            <input id="pfHeight" type="number" min="1" value="${p.height_cm||''}"
+              class="w-full bg-neutral-900 border border-neutral-800 rounded-xl px-3 py-2 text-sm text-white outline-none focus:border-[var(--accent)]/60" />
+          </div>
+          <div>
+            <label class="text-[11px] text-slate-500">Peso atual (kg)</label>
+            <input id="pfWeight" type="number" min="1" step="0.1" value="${p.weight_kg||''}"
+              class="w-full bg-neutral-900 border border-neutral-800 rounded-xl px-3 py-2 text-sm text-white outline-none focus:border-[var(--accent)]/60" />
+          </div>
+        </div>
+        <p class="text-[11px] text-slate-500 mb-2">Objetivos (opcional) — usados para acompanhar o progresso no módulo Corpo.</p>
+        <div class="grid grid-cols-2 gap-2">
+          ${BODY_METRICS.map(m => `
+            <div>
+              <label class="text-[11px] text-slate-500 truncate block">${m.label}${m.unit ? ` (${m.unit})` : ''}</label>
+              <input id="pfGoal_${m.key}" type="number" min="0" step="${m.dec === 0 ? '1' : '0.1'}"
+                value="${p['goal_' + m.key] ?? ''}"
+                class="w-full bg-neutral-900 border border-neutral-800 rounded-xl px-3 py-2 text-sm text-white outline-none focus:border-[var(--accent)]/60" />
+            </div>
+          `).join('')}
+        </div>
+      </div>
+
+      <div class="card rounded-2xl p-4">
+        <div class="flex items-center gap-2 mb-3">
+          <i data-lucide="utensils" class="w-4 h-4 text-[var(--accent)]"></i>
+          <h2 class="text-sm font-semibold text-white">Nutrição</h2>
+        </div>
+        <div class="grid grid-cols-2 gap-2">
+          <div>
+            <label class="text-[11px] text-slate-500">Meta calorias (kcal/dia)</label>
+            <input id="pfCal" type="number" min="1" value="${p.calorie_goal||2000}"
+              class="w-full bg-neutral-900 border border-neutral-800 rounded-xl px-3 py-2 text-sm text-white outline-none focus:border-[var(--accent)]/60" />
+          </div>
+          <div>
+            <label class="text-[11px] text-slate-500">Meta proteína (g/dia)</label>
+            <input id="pfPro" type="number" min="1" value="${p.protein_goal||150}"
+              class="w-full bg-neutral-900 border border-neutral-800 rounded-xl px-3 py-2 text-sm text-white outline-none focus:border-[var(--accent)]/60" />
+          </div>
+          <div>
+            <label class="text-[11px] text-slate-500">Meta hidratos (g/dia)</label>
+            <input id="pfCarb" type="number" min="1" value="${p.carbs_goal||200}"
+              class="w-full bg-neutral-900 border border-neutral-800 rounded-xl px-3 py-2 text-sm text-white outline-none focus:border-[var(--accent)]/60" />
+          </div>
+          <div>
+            <label class="text-[11px] text-slate-500">Meta gordura (g/dia)</label>
+            <input id="pfFat" type="number" min="1" value="${p.fat_goal||70}"
+              class="w-full bg-neutral-900 border border-neutral-800 rounded-xl px-3 py-2 text-sm text-white outline-none focus:border-[var(--accent)]/60" />
+          </div>
+        </div>
+        <p id="pfSaved" class="hidden text-[11px] text-emerald-400 flex items-center gap-1 mt-2"><i data-lucide="check" class="w-3.5 h-3.5"></i> Guardado.</p>
+        <button onclick="saveProfileFromForm()" class="w-full mt-2 bg-[var(--accent)] text-neutral-950 font-bold text-sm rounded-xl py-2.5 flex items-center justify-center gap-1.5 active:scale-[0.98] transition">
+          <i data-lucide="save" class="w-4 h-4"></i> Guardar Alterações
+        </button>
       </div>
 
       <div class="card rounded-2xl p-4">
@@ -4290,11 +4469,13 @@ document.addEventListener('DOMContentLoaded', () => {
       coachError    = null;
       bodyAssessments = [];
       bodyPhotos = [];
-      bodyTab = 'avaliacoes';
+      bodyTab = 'dashboard';
       bodyNotes = '';
       expandedAssessmentId = null;
       bodySuccess = null;
       bodyError = null;
+      bodyCalendarViewMonth = todayISO().slice(0,7);
+      bodyCalendarSelectedDate = todayISO();
       showAdminPanel = false;
       adminData = null;
       adminSelectedUserId = null;

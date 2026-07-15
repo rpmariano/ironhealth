@@ -160,7 +160,7 @@
       </button>
       <button onclick="fabCreateAssessment()" type="button"
         class="flex items-center gap-2 bg-neutral-900 border border-neutral-800 pl-2.5 pr-3.5 py-2 rounded-full shadow-lg active:scale-95 transition">
-        <span class="w-7 h-7 rounded-full flex items-center justify-center text-white shrink-0" style="background:linear-gradient(135deg,#065f46,#14b8a6);"><i data-lucide="scale" class="w-3.5 h-3.5"></i></span>
+        <span class="w-7 h-7 rounded-full flex items-center justify-center text-white shrink-0" style="background:linear-gradient(135deg,#5b21b6,#a855f7);"><i data-lucide="scale" class="w-3.5 h-3.5"></i></span>
         <span class="text-xs font-semibold text-white whitespace-nowrap">Nova avaliação</span>
       </button>
       <div class="flex items-center gap-2 bg-neutral-900/60 border border-neutral-800 pl-2.5 pr-3.5 py-2 rounded-full opacity-50">
@@ -270,7 +270,7 @@ const WEEKDAYS = [
 const VERTICALS = [
   { key:'home', label:'Início', icon:'layout-grid' },
   { key:'nutricao', label:'Nutrição', icon:'utensils' },
-  { key:'corpo', label:'Corpo', icon:'scale', from:'#065f46', to:'#14b8a6',
+  { key:'corpo', label:'Corpo', icon:'scale', from:'#5b21b6', to:'#a855f7',
     desc:'Envia prints da app Renpho Health e a IA extrai as métricas de composição corporal, avalia os números e acompanha a tua evolução ao longo do tempo.' },
   { key:'ginasio', label:'Ginásio', icon:'dumbbell', from:'#1e3a8a', to:'#6366f1',
     desc:'Regista os teus treinos de ginásio e acompanha a evolução de cargas, séries e repetições ao longo do tempo.' },
@@ -1603,7 +1603,7 @@ function renderHome(){
           </div>
           <i data-lucide="utensils" class="w-20 h-20 absolute -right-2 -bottom-2 text-white/15"></i>
         </button>
-        <button onclick="switchVertical('corpo')" class="rounded-2xl p-4 text-left relative overflow-hidden min-h-[132px]" style="background:linear-gradient(135deg, #065f46, #14b8a6);">
+        <button onclick="switchVertical('corpo')" class="rounded-2xl p-4 text-left relative overflow-hidden min-h-[132px]" style="background:linear-gradient(135deg, #5b21b6, #a855f7);">
           <div class="relative z-10 h-full flex flex-col justify-between">
             <i data-lucide="scale" class="w-6 h-6 text-white/90"></i>
             <div>
@@ -2085,7 +2085,7 @@ function renderBodyDashboard(){
   if (!bodyAssessments.length) {
     return `
       <div class="min-h-[50vh] flex flex-col items-center justify-center text-center px-6 fade-in">
-        <span class="w-16 h-16 rounded-3xl flex items-center justify-center mb-4" style="background:linear-gradient(135deg,#065f46,#14b8a6);">
+        <span class="w-16 h-16 rounded-3xl flex items-center justify-center mb-4" style="background:linear-gradient(135deg,#5b21b6,#a855f7);">
           <i data-lucide="scale" class="w-7 h-7 text-white"></i>
         </span>
         <p class="text-xs text-slate-500 max-w-xs leading-relaxed">Ainda não tens avaliações. Vai ao Calendário para enviar o teu primeiro print da Renpho Health.</p>

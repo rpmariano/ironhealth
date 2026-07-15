@@ -1682,10 +1682,39 @@ function fmtMetric(m, v){
 }
 
 // Cor do delta consoante o sentido saudável da métrica (BODY_METRICS.good).
+// Usado como fallback quando não há objetivo definido para a métrica.
 function deltaClass(m, delta){
   if (!delta || m.good === null) return 'text-slate-400';
   const improving = m.good === 'up' ? delta > 0 : delta < 0;
   return improving ? 'text-emerald-400' : 'text-red-400';
+}
+
+// Objetivo do utilizador para uma métrica do Corpo (ou null se não definido).
+function bodyGoal(m){
+  const v = state.profile ? state.profile['goal_' + m.key] : null;
+  return (v === null || v === undefined || v === '') ? null : Number(v);
+}
+
+// Cor da seta de evolução entre duas leituras. Com objetivo definido: compara
+// a distância ao objetivo antes/depois — aproximar = verde, afastar =
+// vermelho, mesma distância = neutro. Sem objetivo, cai no sentido genérico
+// saudável da métrica (BODY_METRICS.good), como antes.
+// Nota: a direção da seta (▲/▼) reflete sempre o sinal real da variação —
+// só a COR depende de estar a aproximar-se ou a afastar-se do objetivo.
+function deltaTrendClass(m, prevValue, latestValue){
+  if (prevValue === null || prevValue === undefined || latestValue === null || latestValue === undefined) {
+    return 'text-slate-400';
+  }
+  const goal = bodyGoal(m);
+  const delta = Number(latestValue) - Number(prevValue);
+  if (goal !== null) {
+    const distPrev = Math.abs(Number(prevValue) - goal);
+    const distLatest = Math.abs(Number(latestValue) - goal);
+    if (distLatest < distPrev) return 'text-emerald-400';
+    if (distLatest > distPrev) return 'text-red-400';
+    return 'text-slate-400';
+  }
+  return deltaClass(m, delta);
 }
 
 // Classes do badge para a etiqueta de estado que a Renpho mostra por métrica.
@@ -1974,7 +2003,7 @@ function renderAssessmentCard(a){
     if (v !== null && v !== undefined && pv !== null && pv !== undefined) {
       const d = Number(v) - Number(pv);
       if (Math.abs(d) >= (m.dec === 0 ? 1 : 0.05)) {
-        delta = `<span class="text-[10px] font-semibold ${deltaClass(m, d)}">${d > 0 ? '▲' : '▼'} ${Math.abs(d).toFixed(m.dec)}</span>`;
+        delta = `<span class="text-[10px] font-semibold ${deltaTrendClass(m, pv, v)}">${d > 0 ? '▲' : '▼'} ${Math.abs(d).toFixed(m.dec)}</span>`;
       }
     }
     return `
@@ -2067,16 +2096,33 @@ function renderBodyDashboard(){
   }
   const m = BODY_METRICS.find(x => x.key === selectedBodyMetric) || BODY_METRICS[0];
 
-  // Última e primeira leitura (com valor) da métrica selecionada, para o resumo.
+  // Leituras da métrica selecionada, mais recente primeiro (bodyAssessments já
+  // vem ordenada por data desc).
   const withVal = bodyAssessments.filter(a => a[m.key] !== null && a[m.key] !== undefined);
   const latest = withVal[0];
-  const oldest = withVal[withVal.length - 1];
-  let deltaTotal = '';
-  if (latest && oldest && latest !== oldest) {
-    const d = Number(latest[m.key]) - Number(oldest[m.key]);
+  const previous = withVal[1] || null;
+  const goal = bodyGoal(m);
+
+  // Seta de tendência: compara as duas leituras mais recentes. A cor indica
+  // se a variação aproxima (verde) ou afasta (vermelho) do objetivo definido
+  // — ou, sem objetivo, o sentido genérico saudável da métrica.
+  let trendArrow = '';
+  if (latest && previous) {
+    const d = Number(latest[m.key]) - Number(previous[m.key]);
     if (Math.abs(d) >= (m.dec === 0 ? 1 : 0.05)) {
-      deltaTotal = `<span class="text-xs font-semibold ${deltaClass(m, d)}">${d > 0 ? '▲' : '▼'} ${Math.abs(d).toFixed(m.dec)} ${m.unit}</span> <span class="text-[11px] text-slate-500">desde ${formatDatePT(oldest.date)}</span>`;
+      trendArrow = `<span class="text-base font-semibold ${deltaTrendClass(m, previous[m.key], latest[m.key])}">${d > 0 ? '▲' : '▼'}</span>`;
     }
+  }
+
+  // Subtítulo: distância ao objetivo (se definido) ou nº de leituras.
+  let subtitle;
+  if (goal !== null && latest) {
+    const dist = Math.abs(Number(latest[m.key]) - goal);
+    subtitle = dist < (m.dec === 0 ? 1 : 0.05)
+      ? `<span class="text-[11px] text-emerald-400 font-semibold">Objetivo atingido</span>`
+      : `<span class="text-[11px] text-slate-500">Objetivo: <span class="text-slate-300 font-semibold">${fmtMetric(m, goal)}</span> · faltam ${dist.toFixed(m.dec)} ${m.unit}</span>`;
+  } else {
+    subtitle = `<span class="text-[11px] text-slate-500">${withVal.length} leitura(s)${goal===null ? ' · sem objetivo definido' : ''}</span>`;
   }
 
   const chips = BODY_METRICS.map(x => `
@@ -2087,14 +2133,24 @@ function renderBodyDashboard(){
     </button>
   `).join('');
 
-  // Últimos valores de todas as métricas (leitura mais recente que tem cada uma).
+  // Últimos valores de todas as métricas, com seta de tendência (goal-aware)
+  // comparando as duas leituras mais recentes de cada uma.
   const latestGrid = BODY_METRICS.map(x => {
-    const a = bodyAssessments.find(as => as[x.key] !== null && as[x.key] !== undefined);
+    const withValX = bodyAssessments.filter(as => as[x.key] !== null && as[x.key] !== undefined);
+    const a = withValX[0];
+    const prevA = withValX[1] || null;
     const badge = a ? classificationBadge(a, x.key, 'mt-1 inline-block') : '';
+    let arrow = '';
+    if (a && prevA) {
+      const d = Number(a[x.key]) - Number(prevA[x.key]);
+      if (Math.abs(d) >= (x.dec === 0 ? 1 : 0.05)) {
+        arrow = ` <span class="text-[10px] font-semibold ${deltaTrendClass(x, prevA[x.key], a[x.key])}">${d > 0 ? '▲' : '▼'}</span>`;
+      }
+    }
     return `
       <div class="card rounded-xl p-3">
         <p class="text-[10px] text-slate-500 truncate">${x.label}</p>
-        <p class="text-sm font-bold text-white mt-0.5">${a ? fmtMetric(x, a[x.key]) : '—'}</p>
+        <p class="text-sm font-bold text-white mt-0.5">${a ? fmtMetric(x, a[x.key]) : '—'}${arrow}</p>
         ${badge}
       </div>`;
   }).join('');
@@ -2109,9 +2165,12 @@ function renderBodyDashboard(){
             <span class="w-2.5 h-2.5 rounded-full" style="background:${m.color}"></span>
             <h2 class="text-sm font-semibold text-white">${m.label}</h2>
           </div>
-          ${latest ? `<span class="text-lg font-bold text-white">${fmtMetric(m, latest[m.key])}</span>` : ''}
+          <div class="flex items-center gap-1.5">
+            ${latest ? `<span class="text-lg font-bold text-white">${fmtMetric(m, latest[m.key])}</span>` : ''}
+            ${trendArrow}
+          </div>
         </div>
-        <div class="mb-3">${deltaTotal || `<span class="text-[11px] text-slate-500">${withVal.length} leitura(s)</span>`}</div>
+        <div class="mb-3">${subtitle}</div>
         ${withVal.length >= 1 ? `<canvas id="bodyChart" height="190"></canvas>` : `<p class="text-xs text-slate-500">Sem leituras desta métrica ainda.</p>`}
       </div>
 
@@ -2216,22 +2275,32 @@ function renderBodyChart(){
     .sort((a,b) => a.date.localeCompare(b.date));
   if (!points.length) return;
 
+  const goal = bodyGoal(m);
+  const datasets = [{
+    label: `${m.label}${m.unit ? ' (' + m.unit + ')' : ''}`,
+    data: points.map(a => Number(a[m.key])),
+    borderColor: m.color,
+    backgroundColor: hexToRgba(m.color, 0.15),
+    pointBackgroundColor: m.color,
+    pointRadius: points.length > 20 ? 0 : 3,
+    borderWidth: 2,
+    tension: 0.25,
+    fill: true,
+  }];
+  // Linha tracejada do objetivo — mesmo estilo da meta no dashboard da Nutrição.
+  if (goal !== null) {
+    datasets.push({
+      label: 'Objetivo', data: points.map(() => goal),
+      borderColor: '#ef4444', borderDash: [6,4], pointRadius: 0, borderWidth: 1.5,
+    });
+  }
+
   Chart.defaults.color = theme === 'light' ? '#475569' : '#a1a1aa';
   bodyChart = new Chart(canvas, {
     type: 'line',
     data: {
       labels: points.map(a => a.date.slice(8,10) + '/' + a.date.slice(5,7)),
-      datasets: [{
-        label: `${m.label}${m.unit ? ' (' + m.unit + ')' : ''}`,
-        data: points.map(a => Number(a[m.key])),
-        borderColor: m.color,
-        backgroundColor: hexToRgba(m.color, 0.15),
-        pointBackgroundColor: m.color,
-        pointRadius: points.length > 20 ? 0 : 3,
-        borderWidth: 2,
-        tension: 0.25,
-        fill: true,
-      }],
+      datasets,
     },
     options: {
       responsive: true,

@@ -1717,6 +1717,20 @@ function deltaTrendClass(m, prevValue, latestValue){
   return deltaClass(m, delta);
 }
 
+// Seta de tendência (▲/▼) + diferença entre parêntesis com sinal, ambas na
+// cor goal-aware de deltaTrendClass (ex.: "▲ (+0.5 kg)"). Devolve '' se não
+// houver duas leituras comparáveis ou a diferença for irrelevante.
+function deltaArrowLabel(m, prevValue, latestValue, sizeClass){
+  if (prevValue === null || prevValue === undefined || latestValue === null || latestValue === undefined) return '';
+  const d = Number(latestValue) - Number(prevValue);
+  const threshold = m.dec === 0 ? 1 : 0.05;
+  if (Math.abs(d) < threshold) return '';
+  const cls = deltaTrendClass(m, prevValue, latestValue);
+  const sign = d > 0 ? '+' : '-';
+  const unit = m.unit ? ' ' + m.unit : '';
+  return `<span class="font-semibold ${cls} ${sizeClass || ''}">${d > 0 ? '▲' : '▼'} (${sign}${Math.abs(d).toFixed(m.dec)}${unit})</span>`;
+}
+
 // Classes do badge para a etiqueta de estado que a Renpho mostra por métrica.
 // Verde = dentro do normal; âmbar = ligeiramente fora / atenção; vermelho =
 // muito fora. A cor sai das palavras da etiqueta (sem acentos), não da métrica.
@@ -1999,13 +2013,7 @@ function renderAssessmentCard(a){
   const metricRow = (m) => {
     const v = a[m.key];
     const pv = prev ? prev[m.key] : null;
-    let delta = '';
-    if (v !== null && v !== undefined && pv !== null && pv !== undefined) {
-      const d = Number(v) - Number(pv);
-      if (Math.abs(d) >= (m.dec === 0 ? 1 : 0.05)) {
-        delta = `<span class="text-[10px] font-semibold ${deltaTrendClass(m, pv, v)}">${d > 0 ? '▲' : '▼'} ${Math.abs(d).toFixed(m.dec)}</span>`;
-      }
-    }
+    const delta = deltaArrowLabel(m, pv, v, 'text-[10px]');
     return `
       <div class="flex items-center justify-between gap-2 py-1.5 border-b border-neutral-900 last:border-0">
         <span class="text-xs text-slate-400 flex items-center gap-1.5 min-w-0">
@@ -2106,13 +2114,7 @@ function renderBodyDashboard(){
   // Seta de tendência: compara as duas leituras mais recentes. A cor indica
   // se a variação aproxima (verde) ou afasta (vermelho) do objetivo definido
   // — ou, sem objetivo, o sentido genérico saudável da métrica.
-  let trendArrow = '';
-  if (latest && previous) {
-    const d = Number(latest[m.key]) - Number(previous[m.key]);
-    if (Math.abs(d) >= (m.dec === 0 ? 1 : 0.05)) {
-      trendArrow = `<span class="text-base font-semibold ${deltaTrendClass(m, previous[m.key], latest[m.key])}">${d > 0 ? '▲' : '▼'}</span>`;
-    }
-  }
+  const trendArrow = deltaArrowLabel(m, previous ? previous[m.key] : null, latest ? latest[m.key] : null, 'text-xs whitespace-nowrap');
 
   // Subtítulo: distância ao objetivo (se definido) ou nº de leituras.
   let subtitle;
@@ -2140,17 +2142,12 @@ function renderBodyDashboard(){
     const a = withValX[0];
     const prevA = withValX[1] || null;
     const badge = a ? classificationBadge(a, x.key, 'mt-1 inline-block') : '';
-    let arrow = '';
-    if (a && prevA) {
-      const d = Number(a[x.key]) - Number(prevA[x.key]);
-      if (Math.abs(d) >= (x.dec === 0 ? 1 : 0.05)) {
-        arrow = ` <span class="text-[10px] font-semibold ${deltaTrendClass(x, prevA[x.key], a[x.key])}">${d > 0 ? '▲' : '▼'}</span>`;
-      }
-    }
+    const arrow = deltaArrowLabel(x, prevA ? prevA[x.key] : null, a ? a[x.key] : null, 'text-[10px]');
     return `
       <div class="card rounded-xl p-3">
         <p class="text-[10px] text-slate-500 truncate">${x.label}</p>
-        <p class="text-sm font-bold text-white mt-0.5">${a ? fmtMetric(x, a[x.key]) : '—'}${arrow}</p>
+        <p class="text-sm font-bold text-white mt-0.5">${a ? fmtMetric(x, a[x.key]) : '—'}</p>
+        ${arrow ? `<p class="mt-0.5">${arrow}</p>` : ''}
         ${badge}
       </div>`;
   }).join('');
@@ -2160,12 +2157,12 @@ function renderBodyDashboard(){
       <div class="flex gap-2 overflow-x-auto no-scrollbar pb-1">${chips}</div>
 
       <div class="card rounded-2xl p-4">
-        <div class="flex items-center justify-between gap-2 mb-1">
-          <div class="flex items-center gap-2">
-            <span class="w-2.5 h-2.5 rounded-full" style="background:${m.color}"></span>
-            <h2 class="text-sm font-semibold text-white">${m.label}</h2>
+        <div class="flex items-center justify-between gap-2 mb-1 flex-wrap">
+          <div class="flex items-center gap-2 min-w-0">
+            <span class="w-2.5 h-2.5 rounded-full shrink-0" style="background:${m.color}"></span>
+            <h2 class="text-sm font-semibold text-white truncate">${m.label}</h2>
           </div>
-          <div class="flex items-center gap-1.5">
+          <div class="flex items-center gap-1.5 shrink-0">
             ${latest ? `<span class="text-lg font-bold text-white">${fmtMetric(m, latest[m.key])}</span>` : ''}
             ${trendArrow}
           </div>

@@ -23,7 +23,7 @@
 <meta name="apple-mobile-web-app-capable" content="yes" />
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
 <meta name="apple-mobile-web-app-title" content="IronHealth" />
-<meta name="theme-color" content="#fb923c" />
+<meta name="theme-color" content="#e8734a" />
 <script src="https://cdn.tailwindcss.com"></script>
 <script>tailwind.config = { darkMode: 'class' }</script>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.4/dist/chart.umd.min.js"></script>
@@ -175,13 +175,27 @@
 </style>
 </head>
 <body class="bg-neutral-950 text-slate-200 font-sans antialiased">
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+  <defs>
+    <!-- Cor fixa (Terracota) — a marca não deve seguir a cor de destaque escolhida pelo utilizador. -->
+    <linearGradient id="logoRingGrad" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#f5b942"/>
+      <stop offset="100%" stop-color="#e8734a"/>
+    </linearGradient>
+  </defs>
+</svg>
 <div id="app" class="max-w-md mx-auto min-h-screen flex flex-col relative">
 
   <div class="sticky top-0 z-20 bg-neutral-950/90 backdrop-blur border-b border-neutral-800">
     <header class="px-4 pt-4 pb-3 flex items-center justify-between">
       <div class="flex items-center gap-2">
-        <button onclick="handleLogoClick()" class="w-9 h-9 rounded-xl bg-orange-400/10 border border-orange-400/40 flex items-center justify-center active:scale-95 transition">
-          <i data-lucide="zap" class="w-5 h-5 text-orange-400"></i>
+        <button onclick="handleLogoClick()" class="w-9 h-9 rounded-xl flex items-center justify-center active:scale-95 transition"
+          style="background:rgba(232,115,74,0.14); border:1px solid rgba(232,115,74,0.45);">
+          <svg viewBox="0 0 100 100" class="w-5 h-5">
+            <circle cx="50" cy="50" r="26" fill="none" stroke="url(#logoRingGrad)" stroke-width="16"
+                    stroke-linecap="round" stroke-dasharray="130 163" transform="rotate(-90 50 50)"/>
+            <circle cx="50" cy="24.6" r="9" fill="#f5b942"/>
+          </svg>
         </button>
         <div>
           <h1 class="text-base font-bold tracking-tight text-white leading-none">IronHealth</h1>
@@ -1170,7 +1184,11 @@ function renderAuth(){
     <div class="min-h-[75vh] flex items-center justify-center px-2 fade-in">
       <div class="card rounded-2xl p-5 w-full max-w-sm space-y-4">
         <div class="flex items-center gap-2 justify-center">
-          <i data-lucide="zap" class="w-6 h-6 text-orange-400"></i>
+          <svg viewBox="0 0 100 100" class="w-7 h-7">
+            <circle cx="50" cy="50" r="26" fill="none" stroke="url(#logoRingGrad)" stroke-width="16"
+                    stroke-linecap="round" stroke-dasharray="130 163" transform="rotate(-90 50 50)"/>
+            <circle cx="50" cy="24.6" r="9" fill="#f5b942"/>
+          </svg>
           <h2 class="text-base font-bold text-white">IronHealth</h2>
         </div>
         <p class="text-xs text-slate-500 text-center">${authMode==='signin' ? 'Entra na tua conta' : 'Cria a tua conta'}</p>

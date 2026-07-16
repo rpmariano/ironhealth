@@ -30,13 +30,9 @@
 <script src="https://unpkg.com/lucide@latest/dist/umd/lucide.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
 <style id="accent-vars">
-  /* Regra própria para --accent/--accent-dark, atualizada via CSSOM
-     (accentVarsRule.setProperty) em vez de documentElement.style.setProperty.
-     Mudar o atributo style do <html> conta como mutação de DOM e faz o
-     MutationObserver do Tailwind (CDN) voltar a analisar a página inteira,
-     o que provoca o "flash" visível ao trocar de cor. Mexer só na CSSOM
-     (a regra desta folha de estilo) muda as cores sem tocar no DOM. */
-  :root { --accent:#fb923c; --accent-dark:#9a3412; }
+  /* Cor de destaque fixa da app (Âmbar). A personalização de cor foi removida —
+     a única preferência de tema que o utilizador controla é escuro/claro. */
+  :root { --accent:#f5b942; --accent-dark:#92400e; }
 </style>
 <style>
   :root {
@@ -49,32 +45,33 @@
     --tile-base-3:#6b4f30;
   }
 
-  /* Superfícies "quentes" derivadas da cor de destaque escolhida (uma das 6 base).
-     color-mix() lê --accent/--accent-dark em tempo real, por isso a textura
-     acompanha qualquer cor que o utilizador escolha, sem precisar de 6 cópias. */
+  /* Superfícies "Ardósia": carvão frio (levemente azulado) no escuro, slate
+     claro no claro. Um toque de âmbar entra via color-mix() para dar calor
+     subtil sem voltar ao castanho. O cartão "Hoje"/módulos usam --tile-base-*
+     (quente, fixo) para se destacarem como o único elemento em cor forte. */
   html:not(.light) {
-    --surf-950: color-mix(in srgb, var(--accent) 6%,  #100e0c);
-    --surf-900: color-mix(in srgb, var(--accent) 10%, #1c1815);
-    --surf-800: color-mix(in srgb, var(--accent) 14%, #2a2420);
-    --surf-700: color-mix(in srgb, var(--accent) 18%, #38302a);
-    --brd-700:  color-mix(in srgb, var(--accent-dark) 40%, #81674a);
-    --brd-800:  color-mix(in srgb, var(--accent-dark) 32%, #5a4934);
-    --brd-900:  color-mix(in srgb, var(--accent-dark) 26%, #3a2f24);
-    --page-bg:  color-mix(in srgb, var(--accent-dark) 16%, #1c1712);
-    --input-bg: color-mix(in srgb, var(--accent) 18%, #4a4030);
-    --grain-opacity: 0.08;
+    --surf-950: color-mix(in srgb, var(--accent) 2%, #0f1116);
+    --surf-900: color-mix(in srgb, var(--accent) 3%, #181b21);
+    --surf-800: color-mix(in srgb, var(--accent) 4%, #22262e);
+    --surf-700: color-mix(in srgb, var(--accent) 5%, #2c313a);
+    --brd-700:  color-mix(in srgb, var(--accent-dark) 14%, #3a4049);
+    --brd-800:  color-mix(in srgb, var(--accent-dark) 10%, #2a2f37);
+    --brd-900:  color-mix(in srgb, var(--accent-dark) 8%, #1c2027);
+    --page-bg:  color-mix(in srgb, var(--accent-dark) 6%, #111318);
+    --input-bg: color-mix(in srgb, var(--accent) 6%, #363c45);
+    --grain-opacity: 0.06;
   }
   html.light {
-    --surf-950: color-mix(in srgb, var(--accent) 4%,  #faf7f1);
-    --surf-900: color-mix(in srgb, var(--accent) 7%,  #f2ece0);
-    --surf-800: color-mix(in srgb, var(--accent) 11%, #e7dcc7);
-    --surf-700: color-mix(in srgb, var(--accent) 15%, #dccdae);
-    --brd-700:  color-mix(in srgb, var(--accent-dark) 22%, #d3c4a4);
-    --brd-800:  color-mix(in srgb, var(--accent-dark) 18%, #ddd0b6);
-    --brd-900:  color-mix(in srgb, var(--accent-dark) 18%, #ddd0b6);
-    --page-bg:  color-mix(in srgb, var(--accent) 5%, #fbf8f3);
-    --input-bg: color-mix(in srgb, var(--accent) 3%, #fffdf9);
-    --grain-opacity: 0.035;
+    --surf-950: #f6f8fb;
+    --surf-900: #ffffff;
+    --surf-800: #eef2f7;
+    --surf-700: #e2e8f1;
+    --brd-700:  #ccd4df;
+    --brd-800:  #dde4ec;
+    --brd-900:  #e6ebf2;
+    --page-bg:  #f6f8fb;
+    --input-bg: #eef2f7;
+    --grain-opacity: 0.02;
   }
 
   html, body { background:var(--page-bg); }
@@ -132,17 +129,25 @@
   .vertical-btn.active .vertical-icon { background:var(--surf-800); border:2px solid var(--accent); color:var(--accent); }
   .vertical-btn.active .vertical-label { color:var(--accent); }
 
-  .accent-swatch.active { box-shadow:0 0 0 2px var(--page-bg), 0 0 0 4px currentColor; }
+  /* Botões de módulo na barra fixa do fundo (Início/Nutrição/Corpo/Coach). */
+  .vbar-btn.active { color:var(--accent) !important; }
 
   .theme-swatch { border:1px solid var(--brd-800); background:transparent; }
-  .theme-swatch.active { border-color:var(--accent); background:rgba(251,146,60,0.08); }
-  .theme-swatch.active { background:color-mix(in srgb, var(--accent) 10%, transparent); }
+  .theme-swatch.active { border-color:var(--accent); background:color-mix(in srgb, var(--accent) 10%, transparent); }
 
   /* ===== Tema claro ===== */
   html.light { color-scheme: only light; }
   html.light .card { filter:drop-shadow(0 1px 4px rgba(0,0,0,0.08)); }
   html.light .sticky.top-0 { background:color-mix(in srgb, var(--surf-950) 95%, transparent); }
   html.light #bottomNav > div { background:color-mix(in srgb, var(--surf-950) 97%, transparent); }
+
+  /* O âmbar é ótimo como texto no escuro, mas pálido sobre superfícies claras.
+     No tema claro, os estados ativos (módulo/separador) e o texto de destaque
+     usam um âmbar mais escuro (700) para manter o contraste legível. */
+  html.light { --accent-ink:#b45309; }
+  html.light .vbar-btn.active,
+  html.light .tab-btn.active { color:var(--accent-ink) !important; }
+  html.light .tab-btn.active .tab-dot { background:var(--accent-ink); }
 
   html.light [class~="text-white"] { color:#0f172a !important; }
   /* Os cartões "Hoje" e de módulo mantêm fundo escuro em ambos os temas
@@ -221,50 +226,59 @@
       </div>
       <div id="headerActions" class="flex items-center gap-2"></div>
     </header>
-    <div id="verticalStrip" class="hidden px-4 pb-2 flex items-start gap-3 overflow-x-auto no-scrollbar"></div>
+    <!-- Sub-navegação da vertical atual (Dashboard/Calendário, etc.). Fica no
+         topo, logo abaixo do cabeçalho — pertence ao nível "o que estou a ver
+         dentro deste módulo", distinto da tira de módulos no fundo. -->
+    <nav id="bottomNav"></nav>
   </div>
 
   <main id="tab-content" class="flex-1 px-4 pt-4 pb-28 overflow-y-auto"></main>
 
-  <div id="fabRoot" class="hidden fixed right-4 z-30 flex flex-col-reverse items-end gap-2" style="bottom:20px;">
-    <button id="fabMainBtn" onclick="toggleFab()" type="button"
-      class="w-14 h-14 rounded-full bg-[var(--accent)] text-neutral-950 shadow-lg opacity-75 flex items-center justify-center active:scale-95 active:opacity-100 transition">
-      <i data-lucide="plus" id="fabIcon" class="w-6 h-6 transition-transform"></i>
+  <!-- Menu do "+" — abre por cima do botão central da barra. -->
+  <div id="fabMenu" class="hidden fixed left-1/2 -translate-x-1/2 z-40 flex-col items-center gap-2 w-max" style="bottom:86px;">
+    <button onclick="fabCreateMeal()" type="button"
+      class="flex items-center gap-2 bg-neutral-900 border border-neutral-800 pl-2.5 pr-3.5 py-2 rounded-full shadow-lg active:scale-95 transition">
+      <span class="w-7 h-7 rounded-full flex items-center justify-center text-white shrink-0" style="background:linear-gradient(135deg,#065f46,#10b981);"><i data-lucide="camera" class="w-3.5 h-3.5"></i></span>
+      <span class="text-xs font-semibold text-white whitespace-nowrap">Registar refeição</span>
     </button>
-    <div id="fabMenu" class="hidden flex-col items-end gap-2 mb-1">
-      <button onclick="fabCreateMeal()" type="button"
-        class="flex items-center gap-2 bg-neutral-900 border border-neutral-800 pl-2.5 pr-3.5 py-2 rounded-full shadow-lg active:scale-95 transition">
-        <span class="w-7 h-7 rounded-full flex items-center justify-center text-white shrink-0" style="background:linear-gradient(135deg,#065f46,#10b981);"><i data-lucide="camera" class="w-3.5 h-3.5"></i></span>
-        <span class="text-xs font-semibold text-white whitespace-nowrap">Registar refeição</span>
-      </button>
-      <button onclick="fabCreateAssessment()" type="button"
-        class="flex items-center gap-2 bg-neutral-900 border border-neutral-800 pl-2.5 pr-3.5 py-2 rounded-full shadow-lg active:scale-95 transition">
-        <span class="w-7 h-7 rounded-full flex items-center justify-center text-white shrink-0" style="background:linear-gradient(135deg,#5b21b6,#a855f7);"><i data-lucide="scale" class="w-3.5 h-3.5"></i></span>
-        <span class="text-xs font-semibold text-white whitespace-nowrap">Nova avaliação</span>
-      </button>
-      <div class="flex items-center gap-2 bg-neutral-900/60 border border-neutral-800 pl-2.5 pr-3.5 py-2 rounded-full opacity-50">
-        <span class="w-7 h-7 rounded-full flex items-center justify-center text-white shrink-0" style="background:linear-gradient(135deg,#9a3412,#f97316);"><i data-lucide="footprints" class="w-3.5 h-3.5"></i></span>
-        <span class="text-xs font-semibold text-slate-400 whitespace-nowrap">Nova corrida <span class="text-[9px] uppercase text-slate-500">· em breve</span></span>
-      </div>
-      <button id="fabWorkoutBtn" onclick="fabStartWorkout()" type="button"
-        class="flex items-center gap-2 bg-neutral-900 border border-neutral-800 pl-2.5 pr-3.5 py-2 rounded-full shadow-lg active:scale-95 transition">
-        <span class="w-7 h-7 rounded-full flex items-center justify-center text-white shrink-0" style="background:linear-gradient(135deg,#1e3a8a,#6366f1);"><i data-lucide="dumbbell" class="w-3.5 h-3.5"></i></span>
-        <span id="fabWorkoutLabel" class="text-xs font-semibold text-white whitespace-nowrap">Sessão de treino</span>
-      </button>
+    <button onclick="fabCreateAssessment()" type="button"
+      class="flex items-center gap-2 bg-neutral-900 border border-neutral-800 pl-2.5 pr-3.5 py-2 rounded-full shadow-lg active:scale-95 transition">
+      <span class="w-7 h-7 rounded-full flex items-center justify-center text-white shrink-0" style="background:linear-gradient(135deg,#5b21b6,#a855f7);"><i data-lucide="scale" class="w-3.5 h-3.5"></i></span>
+      <span class="text-xs font-semibold text-white whitespace-nowrap">Nova avaliação</span>
+    </button>
+    <div class="flex items-center gap-2 bg-neutral-900/60 border border-neutral-800 pl-2.5 pr-3.5 py-2 rounded-full opacity-50">
+      <span class="w-7 h-7 rounded-full flex items-center justify-center text-white shrink-0" style="background:linear-gradient(135deg,#9a3412,#f97316);"><i data-lucide="footprints" class="w-3.5 h-3.5"></i></span>
+      <span class="text-xs font-semibold text-slate-400 whitespace-nowrap">Nova corrida <span class="text-[9px] uppercase text-slate-500">· em breve</span></span>
     </div>
+    <button id="fabWorkoutBtn" onclick="fabStartWorkout()" type="button"
+      class="flex items-center gap-2 bg-neutral-900 border border-neutral-800 pl-2.5 pr-3.5 py-2 rounded-full shadow-lg active:scale-95 transition">
+      <span class="w-7 h-7 rounded-full flex items-center justify-center text-white shrink-0" style="background:linear-gradient(135deg,#1e3a8a,#6366f1);"><i data-lucide="dumbbell" class="w-3.5 h-3.5"></i></span>
+      <span id="fabWorkoutLabel" class="text-xs font-semibold text-white whitespace-nowrap">Sessão de treino</span>
+    </button>
   </div>
 
-  <nav id="bottomNav" class="fixed bottom-0 left-0 right-0 z-20">
-    <div class="max-w-md mx-auto bg-neutral-900/95 backdrop-blur border-t border-neutral-800 grid grid-cols-2">
-      <button onclick="switchTab('dashboard')" data-tab="dashboard" class="tab-btn flex flex-col items-center gap-1 py-2.5 text-slate-500 text-[11px] font-medium">
-        <i data-lucide="layout-dashboard" class="w-5 h-5"></i>Dashboard
-        <span class="tab-dot w-1 h-1 rounded-full bg-[var(--accent)] opacity-0"></span>
-      </button>
-      <button onclick="switchTab('calendario')" data-tab="calendario" class="tab-btn flex flex-col items-center gap-1 py-2.5 text-slate-500 text-[11px] font-medium">
-        <i data-lucide="calendar-days" class="w-5 h-5"></i>Calendário
-        <span class="tab-dot w-1 h-1 rounded-full bg-[var(--accent)] opacity-0"></span>
-      </button>
-    </div>
+  <!-- Barra fixa no fundo: 4 módulos principais + "+" central elevado.
+       Corrida e Ginásio ficam acessíveis pelos cartões do Início. -->
+  <nav id="verticalStrip" class="hidden fixed bottom-0 left-0 right-0 z-30 max-w-md mx-auto grid grid-cols-5 items-center bg-neutral-900/95 backdrop-blur border-t border-neutral-800 pt-1 pb-2">
+    <button onclick="switchVertical('home')" data-vert="home" class="vbar-btn flex flex-col items-center gap-1 py-1.5 text-slate-500 active:scale-95 transition">
+      <i data-lucide="layout-grid" class="w-5 h-5"></i><span class="text-[10px] font-medium">Início</span>
+    </button>
+    <button onclick="switchVertical('nutricao')" data-vert="nutricao" class="vbar-btn flex flex-col items-center gap-1 py-1.5 text-slate-500 active:scale-95 transition">
+      <i data-lucide="utensils" class="w-5 h-5"></i><span class="text-[10px] font-medium">Nutrição</span>
+    </button>
+    <div aria-hidden="true"></div>
+    <button onclick="switchVertical('corpo')" data-vert="corpo" class="vbar-btn flex flex-col items-center gap-1 py-1.5 text-slate-500 active:scale-95 transition">
+      <i data-lucide="scale" class="w-5 h-5"></i><span class="text-[10px] font-medium">Corpo</span>
+    </button>
+    <button onclick="switchVertical('coach')" data-vert="coach" class="vbar-btn flex flex-col items-center gap-1 py-1.5 text-slate-500 active:scale-95 transition">
+      <i data-lucide="bot" class="w-5 h-5"></i><span class="text-[10px] font-medium">Coach</span>
+    </button>
+    <!-- "+" central elevado (posicionado em absoluto para sobressair da barra). -->
+    <button id="fabMainBtn" onclick="toggleFab()" type="button"
+      class="absolute left-1/2 -translate-x-1/2 w-14 h-14 rounded-full bg-[var(--accent)] text-neutral-950 flex items-center justify-center active:scale-95 transition"
+      style="top:-22px; border:4px solid var(--surf-900); box-shadow:0 8px 20px -4px color-mix(in srgb, var(--accent) 55%, transparent);">
+      <i data-lucide="plus" id="fabIcon" class="w-6 h-6 transition-transform"></i>
+    </button>
   </nav>
 
 </div>
@@ -361,10 +375,10 @@ const VERTICALS = [
 
 // Cor de sistema escolhível no Perfil — 6 opções fixas, tons vibrantes mas não
 // demasiado escuros nem lisos. `dark` é usado no gradiente do cartão "Hoje".
-// Paleta de cores de sistema, organizada por família (usada para agrupar os
-// swatches no Perfil). 'amber' é a cor base por omissão para todos os
-// utilizadores (com tema escuro) — usada como fallback nos pontos do código
-// onde o utilizador ainda não escolheu cor.
+// A personalização de cor foi removida — a app usa sempre Âmbar (definido em
+// CSS, :root --accent). Este mapa mantém-se apenas para accentColorHex()
+// traduzir o accent_color guardado de cada utilizador no painel de admin
+// (contas antigas podem ter outras chaves).
 const ACCENT_COLORS = [
   { key:'orange',    family:'Quente',   label:'Terracota', light:'#e8734a', dark:'#9a3412' },
   { key:'amber',     family:'Quente',   label:'Âmbar',     light:'#f5b942', dark:'#92400e' },
@@ -379,17 +393,6 @@ const ACCENT_COLORS = [
   { key:'lime',      family:'Natural',  label:'Lima',      light:'#a3e635', dark:'#3f6212' },
   { key:'turquoise', family:'Natural',  label:'Turquesa',  light:'#2dd4bf', dark:'#0f766e' },
 ];
-
-// Agrupa ACCENT_COLORS por família, preservando a ordem de primeira ocorrência.
-function accentFamilies(){
-  const order = [];
-  const map = {};
-  ACCENT_COLORS.forEach(c => {
-    if (!map[c.family]) { map[c.family] = []; order.push(c.family); }
-    map[c.family].push(c);
-  });
-  return order.map(name => ({ name, colors: map[name] }));
-}
 
 /* ============================= ADMIN ============================= */
 const ADMIN_EMAIL = 'rpmariano@gmail.com';
@@ -547,34 +550,6 @@ function suggestMealTypeByTime(){
 }
 
 // Devolve a regra :root da folha #accent-vars (CSSOM), criando-a se necessário.
-function accentVarsRule(){
-  const sheet = document.getElementById('accent-vars').sheet;
-  return sheet.cssRules[0].style;
-}
-
-function applyAccentColor(key){
-  const c = ACCENT_COLORS.find(a => a.key === key) || ACCENT_COLORS.find(a => a.key === 'amber');
-  const rule = accentVarsRule();
-  rule.setProperty('--accent', c.light);
-  rule.setProperty('--accent-dark', c.dark);
-}
-
-async function selectAccentColor(key){
-  if (!ACCENT_COLORS.some(c => c.key === key) || !state.profile) return;
-  state.profile.accent_color = key;
-  applyAccentColor(key);
-  // As cores são todas derivadas de --accent/--accent-dark via color-mix(), por
-  // isso mudam em tempo real sem precisar de recriar o DOM — um render() completo
-  // aqui causava um "flash" visível (reconstrução da página + reflow do Tailwind).
-  document.querySelectorAll('.accent-swatch').forEach(btn => {
-    btn.classList.toggle('active', btn.dataset.accentKey === key);
-  });
-  try {
-    const { error } = await sb.from('profiles').update({ accent_color: key }).eq('id', currentUser.id);
-    if (error) throw error;
-  } catch(e) { flashSyncError(e); }
-}
-
 function applyTheme(key){
   theme = (key === 'light') ? 'light' : 'dark';
   const isLight = theme === 'light';
@@ -694,7 +669,6 @@ async function loadAllData(){
       profile = created;
     }
     state.profile = profile;
-    applyAccentColor(profile.accent_color);
     applyTheme(profile.theme);
 
     // refeições desde o início do mês ou da semana (o mais antigo) — cobre os 3 presets
@@ -1340,8 +1314,9 @@ function fabCreateAssessment(){
   goToAvaliarForDate(todayISO());
 }
 document.addEventListener('click', (e) => {
-  const fabRoot = document.getElementById('fabRoot');
-  if (fabOpen && fabRoot && !fabRoot.contains(e.target)) closeFab();
+  const menu = document.getElementById('fabMenu');
+  const btn = document.getElementById('fabMainBtn');
+  if (fabOpen && menu && btn && !menu.contains(e.target) && !btn.contains(e.target)) closeFab();
 });
 
 // Entra em Registar (vertical Nutrição) com a data do dia selecionado já preenchida.
@@ -1500,20 +1475,16 @@ function dayBodyStatus(dateIso){
   return bodyAssessments.some(a => a.date === dateIso) ? 'has' : 'none';
 }
 
-function renderVerticalStrip(){
-  // Perfil é um atalho global, não pertence a nenhuma vertical — não deve
-  // fazer parecer que "Nutrição" (ou outra) está selecionada.
-  const noneActive = activeVertical === 'nutricao' && activeTab === 'perfil';
-  // Ginásio em beta fechada — escondido da strip para todos exceto ADMIN_EMAIL.
-  const verticals = isGymEnabled() ? VERTICALS : VERTICALS.filter(v => v.key !== 'ginasio');
-  return verticals.map(v => `
-    <button onclick="switchVertical('${v.key}')" class="vertical-btn ${(!noneActive && activeVertical===v.key)?'active':''} flex flex-col items-center gap-1 shrink-0 w-14">
-      <span class="vertical-icon w-11 h-11 rounded-2xl flex items-center justify-center transition">
-        <i data-lucide="${v.icon}" class="w-5 h-5"></i>
-      </span>
-      <span class="vertical-label text-[10px] font-medium text-slate-500 transition">${v.label}</span>
-    </button>
-  `).join('');
+// Realça o módulo ativo na barra fixa do fundo (Início/Nutrição/Corpo/Coach).
+// Registar/Perfil são sub-ecrãs da Nutrição; o Perfil é um atalho global e não
+// deve realçar nenhum módulo (senão parecia que "Nutrição" está selecionada).
+function setActiveVerticalBar(){
+  const bar = document.getElementById('verticalStrip');
+  if (!bar) return;
+  const perfilOpen = activeVertical === 'nutricao' && activeTab === 'perfil';
+  bar.querySelectorAll('.vbar-btn').forEach(btn => {
+    btn.classList.toggle('active', !perfilOpen && btn.dataset.vert === activeVertical);
+  });
 }
 
 function render(){
@@ -1522,13 +1493,11 @@ function render(){
   const headerActions = document.getElementById('headerActions');
   const verticalStrip = document.getElementById('verticalStrip');
   const main = document.getElementById('tab-content');
-  const fabRoot = document.getElementById('fabRoot');
   document.getElementById('header-date').textContent = formatDatePT(todayISO());
 
   if (!currentUser) {
     nav.classList.add('hidden');
     verticalStrip.classList.add('hidden');
-    fabRoot.classList.add('hidden');
     headerActions.innerHTML = '';
     main.innerHTML = renderAuth();
     if (window.lucide) lucide.createIcons();
@@ -1538,14 +1507,13 @@ function render(){
   if (showAdminPanel) {
     nav.classList.add('hidden');
     verticalStrip.classList.add('hidden');
-    fabRoot.classList.add('hidden');
     headerActions.innerHTML = `
       <button onclick="closeAdminPanel()"
         class="flex items-center gap-1 bg-neutral-800 text-slate-200 text-xs font-bold pl-2.5 pr-3 py-1.5 rounded-full active:scale-95 transition">
         <i data-lucide="x" class="w-3.5 h-3.5"></i> Fechar
       </button>
     `;
-    main.classList.remove('overflow-hidden', 'pb-4', 'flex', 'flex-col');
+    main.classList.remove('overflow-hidden', 'pb-28', 'flex', 'flex-col');
     main.classList.add('overflow-y-auto', 'pb-28');
     main.innerHTML = renderAdminPanel();
     if (window.lucide) lucide.createIcons();
@@ -1553,7 +1521,6 @@ function render(){
   }
 
   verticalStrip.classList.remove('hidden');
-  verticalStrip.innerHTML = renderVerticalStrip();
   updateFabWorkoutButtonUI();
 
   const showPerfilShortcut = !(activeVertical === 'nutricao' && activeTab === 'perfil');
@@ -1571,48 +1538,45 @@ function render(){
 
   if (dataLoading) {
     nav.classList.add('hidden');
-    fabRoot.classList.add('hidden');
+    verticalStrip.classList.add('hidden');
     main.innerHTML = `<div class="flex items-center justify-center h-[60vh] text-slate-500 text-xs gap-2"><i data-lucide="loader-2" class="w-4 h-4 animate-spin"></i> A carregar dados...</div>`;
     if (window.lucide) lucide.createIcons();
     return;
   }
 
-  fabRoot.classList.remove('hidden');
-
   // Ginásio em beta fechada — se por algum motivo o estado apontar para lá
   // sem a conta ter acesso (ex: estado antigo em memória), volta ao Início.
   if (activeVertical === 'ginasio' && !isGymEnabled()) activeVertical = 'home';
 
+  // Realça o módulo ativo na barra fixa do fundo.
+  setActiveVerticalBar();
+
   if (activeVertical !== 'nutricao') {
     if (activeVertical === 'coach') {
       nav.classList.add('hidden');
-      // No Coach o input/botão de enviar fica pregado ao fundo do ecrã, tal como
-      // o nav da Nutrição — usa a mesma folga para não ficar por cima.
-      fabRoot.style.bottom = '92px';
       // Layout especial: o main torna-se um flex column sem scroll próprio
       // para que a lista de mensagens e o input partilhem a altura disponível.
       main.classList.remove('overflow-y-auto', 'pb-28');
-      main.classList.add('overflow-hidden', 'pb-4', 'flex', 'flex-col');
+      main.classList.add('overflow-hidden', 'pb-28', 'flex', 'flex-col');
       main.innerHTML = renderCoach();
       if (window.lucide) lucide.createIcons();
       scrollCoachToBottom();
       return;
     }
     if (activeVertical === 'ginasio') {
-      main.classList.remove('overflow-hidden', 'pb-4', 'flex', 'flex-col');
+      main.classList.remove('overflow-hidden', 'pb-28', 'flex', 'flex-col');
       main.classList.add('overflow-y-auto', 'pb-28');
       if (gymScreen === 'treino' || gymScreen === 'stats') {
-        // Ecrã focado (sessão a decorrer / estatísticas finais): esconde nav e FAB.
+        // Ecrã focado (sessão a decorrer / estatísticas finais): esconde a
+        // sub-navegação e a barra de módulos para foco total.
         nav.classList.add('hidden');
-        fabRoot.classList.add('hidden');
+        verticalStrip.classList.add('hidden');
         main.innerHTML = gymScreen === 'treino' ? renderTreino() : renderStats();
       } else {
         // Nav próprio do Ginásio (Biblioteca / Planos / Evolução) injetado no
         // mesmo #bottomNav — restaurado para Nutrição quando se volta lá.
         nav.classList.remove('hidden');
         nav.innerHTML = renderGymNav();
-        fabRoot.classList.remove('hidden');
-        fabRoot.style.bottom = '92px';
         main.innerHTML = renderGinasio();
       }
       if (window.lucide) lucide.createIcons();
@@ -1626,16 +1590,14 @@ function render(){
       // Registar faz na Nutrição) em vez de o esconder.
       nav.classList.remove('hidden');
       nav.innerHTML = CORPO_NAV_HTML;
-      main.classList.remove('overflow-hidden', 'pb-4', 'flex', 'flex-col');
+      main.classList.remove('overflow-hidden', 'pb-28', 'flex', 'flex-col');
       main.classList.add('overflow-y-auto', 'pb-28');
-      fabRoot.style.bottom = '92px';
       const navHighlight = bodyTab === 'avaliar' ? 'calendario' : bodyTab;
       document.querySelectorAll('.tab-btn').forEach(btn => {
         btn.classList.toggle('active', btn.dataset.tab === navHighlight);
       });
-      // Já estamos no próprio ecrã de criação — o atalho seria redundante.
-      if (bodyTab === 'avaliar') { closeFab(); fabRoot.classList.add('hidden'); }
-      else fabRoot.classList.remove('hidden');
+      // Já estamos no ecrã de criação — fecha o menu do "+" se estiver aberto.
+      if (bodyTab === 'avaliar') closeFab();
 
       if (bodyTab === 'dashboard') main.innerHTML = renderBodyDashboard();
       else if (bodyTab === 'avaliar') main.innerHTML = renderBodyAvaliar();
@@ -1645,10 +1607,9 @@ function render(){
       if (bodyTab === 'dashboard') requestAnimationFrame(renderBodyChart);
       return;
     }
-    // Início / Corrida → placeholder simples, sem nav.
+    // Início / Corrida → placeholder simples, sem sub-navegação de topo.
     nav.classList.add('hidden');
-    fabRoot.style.bottom = '20px';
-    main.classList.remove('overflow-hidden', 'pb-4', 'flex', 'flex-col');
+    main.classList.remove('overflow-hidden', 'pb-28', 'flex', 'flex-col');
     main.classList.add('overflow-y-auto', 'pb-28');
     if (activeVertical === 'home') main.innerHTML = renderHome();
     else main.innerHTML = renderVerticalPlaceholder(VERTICALS.find(v => v.key === activeVertical));
@@ -1661,24 +1622,22 @@ function render(){
   nav.innerHTML = NUTRITION_NAV_HTML;
 
   // Restaurar layout normal ao entrar na vertical Nutrição (caso venha do Coach)
-  main.classList.remove('overflow-hidden', 'pb-4', 'flex', 'flex-col');
+  main.classList.remove('overflow-hidden', 'pb-28', 'flex', 'flex-col');
   main.classList.add('overflow-y-auto', 'pb-28');
 
   // Perfil é um atalho global (não um separador de Dashboard/Calendário) —
   // o nav inferior da Nutrição não deve ficar visível enquanto lá estivermos.
   if (activeTab === 'perfil') {
     nav.classList.add('hidden');
-    fabRoot.style.bottom = '20px';
   } else {
     nav.classList.remove('hidden');
-    fabRoot.style.bottom = '92px';
     const navHighlight = activeTab === 'registar' ? 'calendario' : activeTab; // Registar é acedido a partir do Calendário
     document.querySelectorAll('.tab-btn').forEach(btn => {
       btn.classList.toggle('active', btn.dataset.tab === navHighlight);
     });
   }
-  // Já estamos no próprio ecrã de criação — o atalho seria redundante.
-  if (activeTab === 'registar') { closeFab(); fabRoot.classList.add('hidden'); }
+  // Já estamos no ecrã de criação — fecha o menu do "+" se estiver aberto.
+  if (activeTab === 'registar') closeFab();
 
   if (activeTab === 'dashboard') main.innerHTML = renderDashboard();
   else if (activeTab === 'registar') main.innerHTML = renderRegistar();
@@ -1689,15 +1648,22 @@ function render(){
   if (activeTab === 'dashboard') requestAnimationFrame(renderDashChart);
 }
 
-// Fundo com o mesmo padrão de brilho do cartão "Hoje" (base escura quente +
-// brilho radial no canto), mas usando a cor de marca de cada módulo em vez da
-// cor de destaque do utilizador — mantém a identidade de cada vertical e, ao
-// mesmo tempo, o mesmo tratamento visual do cartão "Hoje".
-function moduleCardBg(hex){
-  return `background:
-      radial-gradient(120% 140% at 15% 0%, color-mix(in srgb, ${hex} 65%, transparent) 0%, transparent 65%),
-      linear-gradient(135deg, color-mix(in srgb, ${hex} 68%, var(--tile-base-1)) 0%, color-mix(in srgb, ${hex} 48%, var(--tile-base-3)) 100%);
-      border:1px solid var(--brd-700);`;
+// Cartão de módulo no Início: superfície neutra (igual ao resto da app) com um
+// selo de cor + barra lateral que identificam o módulo sem competir com o
+// cartão "Hoje" (o único elemento de cor forte, seguindo a regra 60/30/10).
+function moduleCard({ onclick, icon, color, g1, g2, title, sub, soon }){
+  return `
+    <button ${onclick ? `onclick="${onclick}"` : ''}
+      class="relative bg-neutral-900 border border-neutral-800 rounded-2xl p-3.5 text-left flex items-center gap-3 transition ${onclick ? 'active:scale-[0.98]' : 'cursor-default'} ${soon ? 'opacity-60' : ''}">
+      <span class="absolute left-0 top-3 bottom-3 w-[3px] rounded-full" style="background:${color}"></span>
+      <span class="w-10 h-10 rounded-xl flex items-center justify-center shrink-0" style="background:linear-gradient(135deg,${g1},${g2})">
+        <i data-lucide="${icon}" class="w-5 h-5 text-white"></i>
+      </span>
+      <div class="min-w-0">
+        <p class="text-sm font-bold text-white leading-tight">${title}</p>
+        <p class="text-[11px] text-slate-400 mt-0.5 truncate">${sub}</p>
+      </div>
+    </button>`;
 }
 
 /* ============================= INÍCIO (visão geral das verticais) ============================= */
@@ -1724,57 +1690,17 @@ function renderHome(){
         <i data-lucide="flame" class="w-24 h-24 absolute -right-3 -bottom-3 text-white/15"></i>
       </div>
 
-      <div class="grid grid-cols-2 gap-3">
-        <button onclick="switchVertical('nutricao')" class="tile-dark rounded-2xl p-4 text-left relative overflow-hidden min-h-[132px]" style="${moduleCardBg('#10b981')}">
-          <div class="relative z-10 h-full flex flex-col justify-between">
-            <i data-lucide="utensils" class="w-6 h-6 text-white/90"></i>
-            <div>
-              <p class="text-xs font-semibold text-white">Nutrição</p>
-              <p class="text-[11px] text-white/80 mt-0.5">${mealsToday} refeição(ões) hoje</p>
-            </div>
-          </div>
-          <i data-lucide="utensils" class="w-20 h-20 absolute -right-2 -bottom-2 text-white/15"></i>
-        </button>
-        <button onclick="switchVertical('corpo')" class="tile-dark rounded-2xl p-4 text-left relative overflow-hidden min-h-[132px]" style="${moduleCardBg('#a855f7')}">
-          <div class="relative z-10 h-full flex flex-col justify-between">
-            <i data-lucide="scale" class="w-6 h-6 text-white/90"></i>
-            <div>
-              <p class="text-xs font-semibold text-white">Corpo</p>
-              <p class="text-[11px] text-white/80 mt-0.5">${bodyAssessments.length ? `${bodyAssessments.length} avaliação(ões)` : 'Avaliação corporal'}</p>
-            </div>
-          </div>
-          <i data-lucide="scale" class="w-20 h-20 absolute -right-2 -bottom-2 text-white/15"></i>
-        </button>
-        <button onclick="${isGymEnabled() ? `switchVertical('ginasio')` : ''}" class="tile-dark rounded-2xl p-4 text-left relative overflow-hidden min-h-[132px] ${isGymEnabled() ? '' : 'cursor-default'}" style="${moduleCardBg('#6366f1')}">
-          <div class="relative z-10 h-full flex flex-col justify-between">
-            <i data-lucide="dumbbell" class="w-6 h-6 text-white/90"></i>
-            <div>
-              <p class="text-xs font-semibold text-white">Ginásio</p>
-              <p class="text-[11px] text-white/80 mt-0.5">${isGymEnabled() ? `${(gymRef.exercises||[]).length} exercícios` : 'Em breve'}</p>
-            </div>
-          </div>
-          <i data-lucide="dumbbell" class="w-20 h-20 absolute -right-2 -bottom-2 text-white/15"></i>
-        </button>
-        <button onclick="switchVertical('corrida')" class="tile-dark rounded-2xl p-4 text-left relative overflow-hidden min-h-[132px]" style="${moduleCardBg('#f97316')}">
-          <div class="relative z-10 h-full flex flex-col justify-between">
-            <i data-lucide="footprints" class="w-6 h-6 text-white/90"></i>
-            <div>
-              <p class="text-xs font-semibold text-white">Corrida</p>
-              <p class="text-[11px] text-white/80 mt-0.5">Em breve</p>
-            </div>
-          </div>
-          <i data-lucide="footprints" class="w-20 h-20 absolute -right-2 -bottom-2 text-white/15"></i>
-        </button>
-        <button onclick="switchVertical('coach')" class="tile-dark rounded-2xl p-4 text-left relative overflow-hidden min-h-[132px]" style="${moduleCardBg('#06b6d4')}">
-          <div class="relative z-10 h-full flex flex-col justify-between">
-            <i data-lucide="bot" class="w-6 h-6 text-white/90"></i>
-            <div>
-              <p class="text-xs font-semibold text-white">Coach</p>
-              <p class="text-[11px] text-white/80 mt-0.5">Em breve</p>
-            </div>
-          </div>
-          <i data-lucide="bot" class="w-20 h-20 absolute -right-2 -bottom-2 text-white/15"></i>
-        </button>
+      <div class="grid grid-cols-2 gap-2.5">
+        ${moduleCard({ onclick:"switchVertical('nutricao')", icon:'utensils', color:'#10b981', g1:'#065f46', g2:'#10b981',
+          title:'Nutrição', sub:`${mealsToday} refeição(ões) hoje` })}
+        ${moduleCard({ onclick:"switchVertical('corpo')", icon:'scale', color:'#a855f7', g1:'#5b21b6', g2:'#a855f7',
+          title:'Corpo', sub: bodyAssessments.length ? `${bodyAssessments.length} avaliação(ões)` : 'Avaliação corporal' })}
+        ${moduleCard({ onclick: isGymEnabled() ? "switchVertical('ginasio')" : '', icon:'dumbbell', color:'#6366f1', g1:'#1e3a8a', g2:'#6366f1',
+          title:'Ginásio', sub: isGymEnabled() ? `${(gymRef.exercises||[]).length} exercícios` : 'Em breve', soon: !isGymEnabled() })}
+        ${moduleCard({ onclick:"switchVertical('corrida')", icon:'footprints', color:'#f97316', g1:'#9a3412', g2:'#f97316',
+          title:'Corrida', sub:'Em breve' })}
+        ${moduleCard({ onclick:"switchVertical('coach')", icon:'bot', color:'#06b6d4', g1:'#155e75', g2:'#06b6d4',
+          title:'Coach', sub:'Em breve' })}
       </div>
     </div>
   `;
@@ -4136,43 +4062,21 @@ function renderPerfil(){
       </div>
 
       <div class="card rounded-2xl p-4">
-        <div class="flex gap-4">
-          <div class="flex-1 min-w-0">
-            <div class="flex items-center gap-2 mb-3">
-              <i data-lucide="palette" class="w-4 h-4 text-[var(--accent)]"></i>
-              <h2 class="text-sm font-semibold text-white">Cor de Sistema</h2>
-            </div>
-            ${accentFamilies().map(fam => `
-              <div class="mb-3 last:mb-0">
-                <p class="text-[10px] font-semibold text-slate-500 uppercase tracking-wide mb-1.5">${fam.name}</p>
-                <div class="grid grid-cols-3 gap-2">
-                  ${fam.colors.map(c => `
-                    <button onclick="selectAccentColor('${c.key}')" title="${c.label}" data-accent-key="${c.key}"
-                      class="accent-swatch ${p.accent_color===c.key?'active':''} aspect-square rounded-full transition active:scale-90"
-                      style="background:${c.light}; color:${c.light};"></button>
-                  `).join('')}
-                </div>
-              </div>
-            `).join('')}
-          </div>
-          <div class="w-24 shrink-0 border-l border-neutral-800 pl-4">
-            <div class="flex items-center gap-1.5 mb-3">
-              <i data-lucide="sun-moon" class="w-4 h-4 text-[var(--accent)]"></i>
-              <h2 class="text-xs font-semibold text-white">Aparência</h2>
-            </div>
-            <div class="space-y-2">
-              <button onclick="selectTheme('dark')" type="button"
-                class="theme-swatch ${(p.theme||'dark')==='dark'?'active':''} w-full rounded-xl py-3 flex flex-col items-center gap-1.5 transition active:scale-[0.97]">
-                <i data-lucide="moon" class="w-5 h-5 text-slate-300"></i>
-                <span class="text-xs font-semibold text-white">Escuro</span>
-              </button>
-              <button onclick="selectTheme('light')" type="button"
-                class="theme-swatch ${p.theme==='light'?'active':''} w-full rounded-xl py-3 flex flex-col items-center gap-1.5 transition active:scale-[0.97]">
-                <i data-lucide="sun" class="w-5 h-5 text-slate-300"></i>
-                <span class="text-xs font-semibold text-white">Claro</span>
-              </button>
-            </div>
-          </div>
+        <div class="flex items-center gap-2 mb-3">
+          <i data-lucide="sun-moon" class="w-4 h-4 text-[var(--accent)]"></i>
+          <h2 class="text-sm font-semibold text-white">Aparência</h2>
+        </div>
+        <div class="grid grid-cols-2 gap-2">
+          <button onclick="selectTheme('dark')" type="button"
+            class="theme-swatch ${(p.theme||'dark')==='dark'?'active':''} rounded-xl py-3 flex flex-col items-center gap-1.5 transition active:scale-[0.97]">
+            <i data-lucide="moon" class="w-5 h-5 text-slate-300"></i>
+            <span class="text-xs font-semibold text-white">Escuro</span>
+          </button>
+          <button onclick="selectTheme('light')" type="button"
+            class="theme-swatch ${p.theme==='light'?'active':''} rounded-xl py-3 flex flex-col items-center gap-1.5 transition active:scale-[0.97]">
+            <i data-lucide="sun" class="w-5 h-5 text-slate-300"></i>
+            <span class="text-xs font-semibold text-white">Claro</span>
+          </button>
         </div>
       </div>
 

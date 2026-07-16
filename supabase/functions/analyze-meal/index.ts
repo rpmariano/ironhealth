@@ -23,6 +23,12 @@ const MEAL_TYPES = ["pequeno-almoco", "almoco", "lanche", "jantar", "ceia"];
 // Alias que segue sempre o modelo flash estável mais recente — evita 404s
 // quando a Google descontinua modelos para contas novas.
 const GEMINI_MODEL = "gemini-flash-latest";
+// Tempo máximo por chamada ao Gemini antes de desistir e tentar mais uma vez.
+// A API do Gemini (sobretudo no tier gratuito) tem latência muito variável —
+// isto evita que uma chamada presa arraste a função até ao limite rígido da
+// plataforma (~150s), o que produz um erro genérico e ilegível no cliente.
+const GEMINI_TIMEOUT_MS = 40000;
+const GEMINI_RETRIES = 1; // repetições automáticas após timeout, antes de desistir de vez
 
 const RESPONSE_SCHEMA = {
   type: "OBJECT",
@@ -89,6 +95,35 @@ function buildPrompt(notes: string | null): string {
   return prompt;
 }
 
+// fetch com limite de tempo por tentativa + repetições automáticas quando a
+// chamada fica presa (AbortError) ou falha ao nível da rede — não repete
+// respostas HTTP não-2xx do próprio Gemini (esses já são erros "reais",
+// tratados pelo chamador). Ao fim das tentativas, lança um erro com uma
+// mensagem clara para o utilizador em vez de deixar a função ficar pendurada
+// até ao limite rígido da plataforma.
+async function fetchGeminiWithTimeout(
+  url: string,
+  options: RequestInit,
+  timeoutMs = GEMINI_TIMEOUT_MS,
+  retries = GEMINI_RETRIES,
+): Promise<Response> {
+  for (let attempt = 0; ; attempt++) {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), timeoutMs);
+    try {
+      const res = await fetch(url, { ...options, signal: controller.signal });
+      clearTimeout(timer);
+      return res;
+    } catch (e) {
+      clearTimeout(timer);
+      if (attempt < retries) continue;
+      throw new Error(
+        "O Gemini demorou demasiado tempo a responder (mesmo depois de tentar de novo). Tenta outra vez daqui a pouco.",
+      );
+    }
+  }
+}
+
 function jsonResponse(body: unknown, status = 200): Response {
   return new Response(JSON.stringify(body), {
     status,
@@ -127,7 +162,7 @@ async function analyzeWithGemini(
   for (const b64 of images) {
     parts.push({ inline_data: { mime_type: mime, data: b64 } });
   }
-  const geminiRes = await fetch(
+  const geminiRes = await fetchGeminiWithTimeout(
     `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent?key=${geminiKey}`,
     {
       method: "POST",

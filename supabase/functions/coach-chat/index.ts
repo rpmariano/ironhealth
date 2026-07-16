@@ -12,6 +12,12 @@ const GEMINI_MODEL = "gemini-flash-latest";
 const MAX_HISTORY   = 30;   // mensagens mais recentes enviadas ao Gemini
 const MAX_MSG_LEN   = 2000; // caracteres máximos por mensagem
 const MAX_TOOL_ROUNDS = 4;  // idas-e-voltas de function calling antes de forçar resposta final
+// Tempo máximo por chamada ao Gemini antes de desistir e tentar mais uma vez.
+// A API do Gemini (sobretudo no tier gratuito) tem latência muito variável —
+// isto evita que uma chamada presa arraste a função até ao limite rígido da
+// plataforma (~150s), o que produz um erro genérico e ilegível no cliente.
+const GEMINI_TIMEOUT_MS = 40000;
+const GEMINI_RETRIES = 1; // repetições automáticas após timeout, antes de desistir de vez
 
 // Ginásio em beta fechada — funcionalidades do Coach relacionadas com treino
 // (resumo + tool get_gym_history) só ficam ativas para esta conta enquanto a
@@ -67,10 +73,14 @@ const corsHeaders = {
 
 // Resposta estruturada: separa o texto da resposta das sugestões de
 // seguimento, para o cliente poder mostrar as sugestões como botões
-// em vez de o modelo as misturar dentro do texto.
+// em vez de o modelo as misturar dentro do texto. `on_topic` deixa o
+// próprio modelo sinalizar perguntas fora do âmbito da app (ver
+// buildSystemInstruction) — o servidor devolve erro nesse caso em vez
+// de guardar/mostrar uma resposta.
 const RESPONSE_SCHEMA = {
   type: "OBJECT",
   properties: {
+    on_topic: { type: "BOOLEAN" },
     reply: { type: "STRING" },
     suggestions: {
       type: "ARRAY",
@@ -78,8 +88,37 @@ const RESPONSE_SCHEMA = {
       maxItems: 3,
     },
   },
-  required: ["reply", "suggestions"],
+  required: ["on_topic", "reply", "suggestions"],
 };
+
+// fetch com limite de tempo por tentativa + repetições automáticas quando a
+// chamada fica presa (AbortError) ou falha ao nível da rede — não repete
+// respostas HTTP não-2xx do próprio Gemini (esses já são erros "reais",
+// tratados pelo chamador). Ao fim das tentativas, lança um erro com uma
+// mensagem clara para o utilizador em vez de deixar a função ficar pendurada
+// até ao limite rígido da plataforma.
+async function fetchGeminiWithTimeout(
+  url: string,
+  options: RequestInit,
+  timeoutMs = GEMINI_TIMEOUT_MS,
+  retries = GEMINI_RETRIES,
+): Promise<Response> {
+  for (let attempt = 0; ; attempt++) {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), timeoutMs);
+    try {
+      const res = await fetch(url, { ...options, signal: controller.signal });
+      clearTimeout(timer);
+      return res;
+    } catch (e) {
+      clearTimeout(timer);
+      if (attempt < retries) continue;
+      throw new Error(
+        "O Gemini demorou demasiado tempo a responder (mesmo depois de tentar de novo). Tenta outra vez daqui a pouco.",
+      );
+    }
+  }
+}
 
 function jsonResponse(body: unknown, status = 200): Response {
   return new Response(JSON.stringify(body), {
@@ -269,6 +308,12 @@ function buildSystemInstruction(
     `Responde sempre em português de Portugal. ` +
     `Sê direto e prático. Quando adequado, estrutura as respostas com listas ou secções curtas. ` +
     `Não sejas excessivamente longo — responde de forma concisa mas completa.\n\n` +
+    `MUITO IMPORTANTE — âmbito: só respondes a perguntas sobre nutrição, treino de ginásio, ` +
+    `corrida, composição/avaliação corporal, ou o próprio uso desta app. Para QUALQUER pergunta ` +
+    `fora destes temas (ex.: desporto profissional/futebol, atualidade, entretenimento, ` +
+    `perguntas pessoais sobre ti como IA, ou qualquer outro assunto geral), define o campo ` +
+    `"on_topic" como false e deixa "reply" vazio — não tentes responder ao tema nem explicar ` +
+    `porque não podes. Só defines "on_topic" como true quando a pergunta se enquadra no âmbito acima.\n\n` +
     `MUITO IMPORTANTE — foco na pergunta: responde apenas ao que foi perguntado. ` +
     `Se o utilizador pede o próximo treino, dá-lhe só o próximo treino — não expandas ` +
     `automaticamente para um plano da semana inteira, nem inicies sugestões de nutrição ` +
@@ -478,7 +523,7 @@ async function handler(req: Request): Promise<Response> {
     // função devolve uma parte functionCall (ignora o schema), quando decide
     // responder ao utilizador segue o schema {reply, suggestions} como sempre.
     async function callGemini() {
-      const res = await fetch(
+      const res = await fetchGeminiWithTimeout(
         `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent?key=${geminiKey}`,
         {
           method: "POST",
@@ -489,7 +534,7 @@ async function handler(req: Request): Promise<Response> {
             tools: buildTools(gymEnabled),
             generationConfig: {
               temperature: 0.7,
-              maxOutputTokens: 3000,
+              maxOutputTokens: 1200,
               response_mime_type: "application/json",
               response_schema: RESPONSE_SCHEMA,
             },
@@ -502,7 +547,12 @@ async function handler(req: Request): Promise<Response> {
     let geminiJson: Record<string, unknown> | undefined;
     for (let round = 0; round <= MAX_TOOL_ROUNDS; round++) {
       const isLastAllowedRound = round === MAX_TOOL_ROUNDS;
-      const geminiRes = await callGemini();
+      let geminiRes: Response;
+      try {
+        geminiRes = await callGemini();
+      } catch (e) {
+        return jsonResponse({ error: e instanceof Error ? e.message : "Falha ao contactar o coach." }, 504);
+      }
 
       if (!geminiRes.ok) {
         const errText = await geminiRes.text();
@@ -558,6 +608,14 @@ async function handler(req: Request): Promise<Response> {
     let suggestions: string[] = [];
     try {
       const parsed = JSON.parse(rawText);
+      // O modelo sinaliza perguntas fora do âmbito da app (ver
+      // buildSystemInstruction) — devolve erro em vez de guardar/mostrar
+      // uma resposta, e não insere a mensagem do modelo no histórico.
+      if (parsed.on_topic === false) {
+        return jsonResponse({
+          error: "Só posso ajudar com temas de nutrição, treino de ginásio, corrida e composição corporal — os módulos desta app. Tenta outra pergunta relacionada com estas áreas.",
+        }, 400);
+      }
       replyText = typeof parsed.reply === "string" && parsed.reply.trim() ? parsed.reply.trim() : rawText;
       suggestions = Array.isArray(parsed.suggestions)
         ? parsed.suggestions.filter((s: unknown) => typeof s === "string" && s.trim()).slice(0, 3)

@@ -29,15 +29,24 @@
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.4/dist/chart.umd.min.js"></script>
 <script src="https://unpkg.com/lucide@latest/dist/umd/lucide.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
+<style id="accent-vars">
+  /* Regra própria para --accent/--accent-dark, atualizada via CSSOM
+     (accentVarsRule.setProperty) em vez de documentElement.style.setProperty.
+     Mudar o atributo style do <html> conta como mutação de DOM e faz o
+     MutationObserver do Tailwind (CDN) voltar a analisar a página inteira,
+     o que provoca o "flash" visível ao trocar de cor. Mexer só na CSSOM
+     (a regra desta folha de estilo) muda as cores sem tocar no DOM. */
+  :root { --accent:#fb923c; --accent-dark:#9a3412; }
+</style>
 <style>
   :root {
-    --accent:#fb923c; --accent-dark:#9a3412; color-scheme: only dark;
+    color-scheme: only dark;
     /* Base escura fixa (não muda com o tema) para os cartões com texto/ícones
        brancos por cima — "Hoje" e os módulos — para não ficarem lavados no
        tema claro, onde as superfícies neutras (--surf-*) ficam claras. */
-    --tile-base-1:#362717;
+    --tile-base-1:#4a3a26;
     --tile-base-2:#1f160d;
-    --tile-base-3:#4d3a24;
+    --tile-base-3:#6b4f30;
   }
 
   /* Superfícies "quentes" derivadas da cor de destaque escolhida (uma das 6 base).
@@ -505,17 +514,29 @@ function suggestMealTypeByTime(){
   return 'ceia';
 }
 
+// Devolve a regra :root da folha #accent-vars (CSSOM), criando-a se necessário.
+function accentVarsRule(){
+  const sheet = document.getElementById('accent-vars').sheet;
+  return sheet.cssRules[0].style;
+}
+
 function applyAccentColor(key){
   const c = ACCENT_COLORS.find(a => a.key === key) || ACCENT_COLORS.find(a => a.key === 'orange');
-  document.documentElement.style.setProperty('--accent', c.light);
-  document.documentElement.style.setProperty('--accent-dark', c.dark);
+  const rule = accentVarsRule();
+  rule.setProperty('--accent', c.light);
+  rule.setProperty('--accent-dark', c.dark);
 }
 
 async function selectAccentColor(key){
   if (!ACCENT_COLORS.some(c => c.key === key) || !state.profile) return;
   state.profile.accent_color = key;
   applyAccentColor(key);
-  render();
+  // As cores são todas derivadas de --accent/--accent-dark via color-mix(), por
+  // isso mudam em tempo real sem precisar de recriar o DOM — um render() completo
+  // aqui causava um "flash" visível (reconstrução da página + reflow do Tailwind).
+  document.querySelectorAll('.accent-swatch').forEach(btn => {
+    btn.classList.toggle('active', btn.dataset.accentKey === key);
+  });
   try {
     const { error } = await sb.from('profiles').update({ accent_color: key }).eq('id', currentUser.id);
     if (error) throw error;
@@ -1636,8 +1657,8 @@ function render(){
 // mesmo tempo, o mesmo tratamento visual do cartão "Hoje".
 function moduleCardBg(hex){
   return `background:
-      radial-gradient(120% 140% at 15% 0%, color-mix(in srgb, ${hex} 45%, transparent) 0%, transparent 60%),
-      linear-gradient(135deg, color-mix(in srgb, ${hex} 50%, var(--tile-base-1)) 0%, color-mix(in srgb, ${hex} 30%, var(--tile-base-3)) 100%);
+      radial-gradient(120% 140% at 15% 0%, color-mix(in srgb, ${hex} 65%, transparent) 0%, transparent 65%),
+      linear-gradient(135deg, color-mix(in srgb, ${hex} 68%, var(--tile-base-1)) 0%, color-mix(in srgb, ${hex} 48%, var(--tile-base-3)) 100%);
       border:1px solid var(--brd-700);`;
 }
 
@@ -1652,8 +1673,8 @@ function renderHome(){
   return `
     <div class="space-y-4 fade-in">
       <div class="tile-dark rounded-3xl p-5 relative overflow-hidden" style="background:
-          radial-gradient(120% 140% at 15% 0%, color-mix(in srgb, var(--accent) 40%, transparent) 0%, transparent 60%),
-          linear-gradient(135deg, color-mix(in srgb, var(--accent-dark) 55%, var(--tile-base-1)) 0%, color-mix(in srgb, var(--accent) 30%, var(--tile-base-3)) 100%);
+          radial-gradient(120% 140% at 15% 0%, color-mix(in srgb, var(--accent) 60%, transparent) 0%, transparent 65%),
+          linear-gradient(135deg, color-mix(in srgb, var(--accent-dark) 70%, var(--tile-base-1)) 0%, color-mix(in srgb, var(--accent) 48%, var(--tile-base-3)) 100%);
           border:1px solid var(--brd-700);">
         <div class="relative z-10">
           <p class="text-xs font-semibold text-white/70 uppercase tracking-wide mb-1">Hoje</p>
@@ -4088,7 +4109,7 @@ function renderPerfil(){
                 <p class="text-[10px] font-semibold text-slate-500 uppercase tracking-wide mb-1.5">${fam.name}</p>
                 <div class="grid grid-cols-3 gap-2">
                   ${fam.colors.map(c => `
-                    <button onclick="selectAccentColor('${c.key}')" title="${c.label}"
+                    <button onclick="selectAccentColor('${c.key}')" title="${c.label}" data-accent-key="${c.key}"
                       class="accent-swatch ${p.accent_color===c.key?'active':''} aspect-square rounded-full transition active:scale-90"
                       style="background:${c.light}; color:${c.light};"></button>
                   `).join('')}

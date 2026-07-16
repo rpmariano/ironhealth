@@ -19,7 +19,7 @@ create table profiles (
   carbs_goal numeric not null default 200,
   fat_goal numeric not null default 70,
   accent_color text not null default 'orange'
-    check (accent_color in ('blue1','blue2','pink','yellow','orange','green')),
+    check (accent_color in ('orange','amber','coral','teal','sky','steel','plum','fuchsia','pink','green','lime','turquoise')),
   theme text not null default 'dark'
     check (theme in ('dark','light')),
   coach_context text not null default '',

@@ -61,6 +61,12 @@ const RESPONSE_SCHEMA = {
       properties: Object.fromEntries(
         METRIC_FIELDS.map((f) => [f.key, { type: "NUMBER", nullable: true }]),
       ),
+      // Obriga o Gemini a decidir explicitamente cada chave (mesmo que a
+      // resposta seja null) em vez de poder simplesmente omiti-la — sem
+      // isto, observámos avaliações em que o resumo em texto menciona
+      // valores concretos (ex.: gordura visceral, água corporal) que nunca
+      // chegam a aparecer no objeto `metrics` estruturado.
+      required: METRIC_FIELDS.map((f) => f.key),
     },
     // Etiqueta de estado que a Renpho mostra ao lado de cada métrica
     // (ex.: "Média", "Alto", "Baixo", "Ligeiramente alto", "Excelente").
@@ -69,6 +75,7 @@ const RESPONSE_SCHEMA = {
       properties: Object.fromEntries(
         METRIC_FIELDS.map((f) => [f.key, { type: "STRING", nullable: true }]),
       ),
+      required: METRIC_FIELDS.map((f) => f.key),
     },
     summary: { type: "STRING" },
   },

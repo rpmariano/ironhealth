@@ -494,6 +494,7 @@ let editingNotesDraft = '';
 let reanalyzingMealId = null;  // refeição atualmente a ser reanalisada pelo Gemini
 let reanalyzeError = null;
 let signedUrlCache = {};      // photo_path -> signed url
+let signedUrlFailed = {};     // photo_path -> true se o último pedido falhou (permite mostrar "tentar novamente" em vez de um spinner preso)
 let dashChart = null;
 let selectedMacro = 'calories'; // qual macro o gráfico "por Dia" está a mostrar
 let microsCollapsed = false;
@@ -1009,6 +1010,24 @@ function selectMealType(key){
   document.querySelectorAll('.mealtype-pill').forEach(b => b.classList.toggle('active', b.dataset.type === key));
 }
 
+// Tenta ler a mensagem de erro específica do corpo da resposta da Edge
+// Function. Quando a função é interrompida a meio (ex: a análise Gemini
+// demorou demasiado e a plataforma matou a função), a resposta não vem em
+// JSON e error.message fica com o texto genérico e pouco útil do supabase-js
+// ("Edge Function returned a non-2xx status code") — nesse caso damos ao
+// utilizador o motivo mais provável em vez dessa mensagem interna.
+async function edgeFunctionErrorMessage(error, fallback){
+  if (error.context && typeof error.context.json === 'function') {
+    try {
+      const body = await error.context.json();
+      if (body && body.error) return body.error;
+    } catch(_) {
+      return 'A análise demorou demasiado tempo e o servidor interrompeu o pedido. Tenta novamente — costuma resolver-se à segunda tentativa.';
+    }
+  }
+  return error.message || fallback;
+}
+
 async function analyzeMeal(){
   if (!photos.length || analyzing) return;
   const date = document.getElementById('mealDate').value || todayISO();
@@ -1018,14 +1037,7 @@ async function analyzeMeal(){
     const { data, error } = await sb.functions.invoke('analyze-meal', {
       body: { images: photos.map(p => p.base64), mime_type: 'image/jpeg', date, meal_type: selectedMealType, notes: mealNotes || null },
     });
-    if (error) {
-      let msg = error.message || 'Falha na análise.';
-      // FunctionsHttpError: tentar extrair a mensagem do corpo
-      if (error.context && typeof error.context.json === 'function') {
-        try { const body = await error.context.json(); if (body && body.error) msg = body.error; } catch(_){}
-      }
-      throw new Error(msg);
-    }
+    if (error) throw new Error(await edgeFunctionErrorMessage(error, 'Falha na análise.'));
     if (data && data.error) throw new Error(data.error);
 
     const meal = data.meal;
@@ -1081,19 +1093,34 @@ async function toggleMealExpand(mealId){
   if (expandedMealId !== mealId) showAddItemForm = false;
   expandedMealId = expandedMealId === mealId ? null : mealId;
   render();
-  if (expandedMealId) {
-    const found = findMealById(mealId);
-    const paths = (found && found.meal.photo_paths || []).filter(p => !signedUrlCache[p]);
-    if (paths.length) {
-      try {
-        const { data, error } = await sb.storage.from('meal-photos').createSignedUrls(paths, 3600);
-        if (!error && data) {
-          data.forEach(d => { if (d.signedUrl && d.path) signedUrlCache[d.path] = d.signedUrl; });
-          render();
-        }
-      } catch(e) { console.warn('signed urls', e); }
-    }
+  if (expandedMealId) await loadMealPhotoUrls(mealId);
+}
+
+// Pede os URLs assinados das fotos de uma refeição. Isolada de toggleMealExpand
+// para poder ser chamada de novo a partir do botão "Tentar novamente" sem
+// duplicar o fluxo de expandir/recolher.
+async function loadMealPhotoUrls(mealId){
+  const found = findMealById(mealId);
+  const allPaths = (found && found.meal.photo_paths) || [];
+  const paths = allPaths.filter(p => !signedUrlCache[p]);
+  if (!paths.length) return;
+  paths.forEach(p => { delete signedUrlFailed[p]; });
+  try {
+    const { data, error } = await sb.storage.from('meal-photos').createSignedUrls(paths, 3600);
+    if (error) throw error;
+    const returned = new Set();
+    (data || []).forEach(d => {
+      if (d.signedUrl && d.path) { signedUrlCache[d.path] = d.signedUrl; returned.add(d.path); }
+    });
+    // O Supabase pode devolver um erro por-ficheiro dentro de `data` em vez de
+    // rejeitar o pedido todo — qualquer caminho pedido que não volte com URL
+    // conta como falha, para não ficar preso num spinner infinito.
+    paths.forEach(p => { if (!returned.has(p)) signedUrlFailed[p] = true; });
+  } catch(e) {
+    console.warn('signed urls', e);
+    paths.forEach(p => { signedUrlFailed[p] = true; });
   }
+  if (expandedMealId === mealId) render();
 }
 
 function startEditNotes(mealId){
@@ -1142,13 +1169,7 @@ async function reanalyzeMeal(mealId){
     const { data, error } = await sb.functions.invoke('analyze-meal', {
       body: { meal_id: mealId, notes: editingNotesDraft || null },
     });
-    if (error) {
-      let msg = error.message || 'Falha na reanálise.';
-      if (error.context && typeof error.context.json === 'function') {
-        try { const body = await error.context.json(); if (body && body.error) msg = body.error; } catch(_){}
-      }
-      throw new Error(msg);
-    }
+    if (error) throw new Error(await edgeFunctionErrorMessage(error, 'Falha na reanálise.'));
     if (data && data.error) throw new Error(data.error);
 
     const updatedMeal = data.meal;
@@ -1864,13 +1885,7 @@ async function analyzeBody(){
     const { data, error } = await sb.functions.invoke('analyze-body', {
       body: { images: bodyPhotos.map(p => p.base64), mime_type: 'image/jpeg', date, notes: bodyNotes || null },
     });
-    if (error) {
-      let msg = error.message || 'Falha na análise.';
-      if (error.context && typeof error.context.json === 'function') {
-        try { const b = await error.context.json(); if (b && b.error) msg = b.error; } catch(_){}
-      }
-      throw new Error(msg);
-    }
+    if (error) throw new Error(await edgeFunctionErrorMessage(error, 'Falha na análise.'));
     if (data && data.error) throw new Error(data.error);
 
     const assessment = data.assessment;
@@ -1900,13 +1915,7 @@ async function reanalyzeBody(id){
     const { data, error } = await sb.functions.invoke('analyze-body', {
       body: { assessment_id: id, notes: a.notes || null },
     });
-    if (error) {
-      let msg = error.message || 'Falha na reanálise.';
-      if (error.context && typeof error.context.json === 'function') {
-        try { const b = await error.context.json(); if (b && b.error) msg = b.error; } catch(_){}
-      }
-      throw new Error(msg);
-    }
+    if (error) throw new Error(await edgeFunctionErrorMessage(error, 'Falha na reanálise.'));
     if (data && data.error) throw new Error(data.error);
     Object.assign(a, data.assessment);
     logEvent('success', 'body_reanalysis', null, { date: a.date });
@@ -1935,19 +1944,30 @@ async function deleteBodyAssessment(id){
 async function toggleAssessmentExpand(id){
   expandedAssessmentId = expandedAssessmentId === id ? null : id;
   refreshBody();
-  if (expandedAssessmentId) {
-    const a = findAssessmentById(id);
-    const paths = (a && a.photo_paths || []).filter(p => !signedUrlCache[p]);
-    if (paths.length) {
-      try {
-        const { data, error } = await sb.storage.from('body-photos').createSignedUrls(paths, 3600);
-        if (!error && data) {
-          data.forEach(d => { if (d.signedUrl && d.path) signedUrlCache[d.path] = d.signedUrl; });
-          refreshBody();
-        }
-      } catch(e) { console.warn('signed urls', e); }
-    }
+  if (expandedAssessmentId) await loadAssessmentPhotoUrls(id);
+}
+
+// Espelha loadMealPhotoUrls — isolada para poder ser re-chamada a partir do
+// botão "Tentar novamente" sem duplicar o fluxo de expandir/recolher.
+async function loadAssessmentPhotoUrls(id){
+  const a = findAssessmentById(id);
+  const allPaths = (a && a.photo_paths) || [];
+  const paths = allPaths.filter(p => !signedUrlCache[p]);
+  if (!paths.length) return;
+  paths.forEach(p => { delete signedUrlFailed[p]; });
+  try {
+    const { data, error } = await sb.storage.from('body-photos').createSignedUrls(paths, 3600);
+    if (error) throw error;
+    const returned = new Set();
+    (data || []).forEach(d => {
+      if (d.signedUrl && d.path) { signedUrlCache[d.path] = d.signedUrl; returned.add(d.path); }
+    });
+    paths.forEach(p => { if (!returned.has(p)) signedUrlFailed[p] = true; });
+  } catch(e) {
+    console.warn('signed urls', e);
+    paths.forEach(p => { signedUrlFailed[p] = true; });
   }
+  if (expandedAssessmentId === id) refreshBody();
 }
 
 async function updateAssessmentMetric(id, key, rawValue){
@@ -2123,7 +2143,11 @@ function renderAssessmentCard(a){
             <div class="grid grid-cols-3 gap-2">
               ${a.photo_paths.map(p => signedUrlCache[p]
                 ? `<a href="${signedUrlCache[p]}" target="_blank" rel="noopener"><img src="${signedUrlCache[p]}" class="w-full aspect-square object-cover rounded-lg border border-neutral-800" alt="Print" /></a>`
-                : `<div class="w-full aspect-square rounded-lg bg-neutral-900 border border-neutral-800 flex items-center justify-center"><i data-lucide="loader-2" class="w-4 h-4 text-slate-600 animate-spin"></i></div>`
+                : signedUrlFailed[p]
+                  ? `<button onclick="loadAssessmentPhotoUrls('${a.id}')" type="button" class="w-full aspect-square rounded-lg border border-red-500/30 bg-neutral-900 flex flex-col items-center justify-center text-red-400 text-[9px] gap-1 text-center px-1">
+                      <i data-lucide="refresh-cw" class="w-4 h-4"></i> Tentar de novo
+                    </button>`
+                  : `<div class="w-full aspect-square rounded-lg bg-neutral-900 border border-neutral-800 flex items-center justify-center"><i data-lucide="loader-2" class="w-4 h-4 text-slate-600 animate-spin"></i></div>`
               ).join('')}
             </div>` : ''}
 
@@ -3744,7 +3768,11 @@ function renderMealCard(meal){
           <div class="grid ${paths.length===1?'grid-cols-1':'grid-cols-2'} gap-2">
             ${paths.map(p => signedUrlCache[p]
               ? `<img src="${signedUrlCache[p]}" class="w-full rounded-xl border border-neutral-800 ${paths.length>1?'aspect-square object-cover':''}" alt="Foto" />`
-              : `<div class="w-full ${paths.length>1?'aspect-square':'h-32'} rounded-xl border border-neutral-800 bg-neutral-900 flex items-center justify-center text-slate-600 text-xs gap-2"><i data-lucide="loader-2" class="w-4 h-4 animate-spin"></i></div>`
+              : signedUrlFailed[p]
+                ? `<button onclick="loadMealPhotoUrls('${meal.id}')" type="button" class="w-full ${paths.length>1?'aspect-square':'h-32'} rounded-xl border border-red-500/30 bg-neutral-900 flex flex-col items-center justify-center text-red-400 text-[10px] gap-1.5 text-center px-2">
+                    <i data-lucide="refresh-cw" class="w-4 h-4"></i> Falhou a carregar<br/>Toca para tentar de novo
+                  </button>`
+                : `<div class="w-full ${paths.length>1?'aspect-square':'h-32'} rounded-xl border border-neutral-800 bg-neutral-900 flex items-center justify-center text-slate-600 text-xs gap-2"><i data-lucide="loader-2" class="w-4 h-4 animate-spin"></i></div>`
             ).join('')}
           </div>` : ''}
 
@@ -4220,7 +4248,6 @@ function renderCoach() {
         <div class="flex gap-2 items-end">
           <textarea id="coachInputEl" rows="1"
             placeholder="Escreve a tua pergunta…"
-            onkeydown="if(event.key==='Enter'&&!event.shiftKey){event.preventDefault();sendCoachMessage();}"
             oninput="this.style.height='auto';this.style.height=Math.min(this.scrollHeight,120)+'px'"
             class="flex-1 bg-neutral-900 border border-neutral-800 rounded-2xl px-4 py-3 text-sm
                    text-white outline-none focus:border-[var(--accent)]/60 resize-none leading-tight"
@@ -4574,6 +4601,7 @@ document.addEventListener('DOMContentLoaded', () => {
       activeVertical = 'home';
       activeTab = 'dashboard';
       signedUrlCache = {};
+      signedUrlFailed = {};
       coachMessages = [];
       coachLoading  = false;
       coachError    = null;

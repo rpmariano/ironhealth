@@ -75,7 +75,7 @@ create table meals (
   id uuid primary key default gen_random_uuid(),
   user_id uuid not null references auth.users(id) on delete cascade,
   date date not null,
-  meal_type text not null check (meal_type in ('pequeno-almoco','almoco','lanche','jantar','ceia')),
+  meal_type text not null check (meal_type in ('pequeno-almoco','lanche-manha','almoco','lanche','jantar','ceia')),
   photo_paths text[] not null default '{}',
   status text not null default 'ready' check (status in ('pending','analyzing','ready','failed')),
   notes text,

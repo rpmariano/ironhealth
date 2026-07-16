@@ -292,6 +292,7 @@ const sb = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 /* ============================= CONSTANTES ============================= */
 const MEAL_TYPES = [
   { key:'pequeno-almoco', label:'Pequeno-almoço', icon:'sunrise' },
+  { key:'lanche-manha', label:'Lanche da manhã', icon:'coffee' },
   { key:'almoco', label:'Almoço', icon:'sun' },
   { key:'lanche', label:'Lanche', icon:'cookie' },
   { key:'jantar', label:'Jantar', icon:'moon' },
@@ -543,7 +544,8 @@ function mealTypeIcon(key){ const t = MEAL_TYPES.find(t=>t.key===key); return t 
 // Sugere o tipo de refeição consoante a hora atual (o utilizador pode sempre alterar).
 function suggestMealTypeByTime(){
   const h = new Date().getHours() + new Date().getMinutes() / 60;
-  if (h >= 5 && h < 12) return 'pequeno-almoco';
+  if (h >= 5 && h < 10) return 'pequeno-almoco';
+  if (h >= 10 && h < 12) return 'lanche-manha';
   if (h >= 12 && h < 15) return 'almoco';
   if (h >= 15 && h < 19) return 'lanche';
   if (h >= 19 && h < 21.5) return 'jantar';

@@ -18,7 +18,7 @@ const corsHeaders = {
   "Access-Control-Allow-Methods": "POST, OPTIONS",
 };
 
-const MEAL_TYPES = ["pequeno-almoco", "almoco", "lanche", "jantar", "ceia"];
+const MEAL_TYPES = ["pequeno-almoco", "lanche-manha", "almoco", "lanche", "jantar", "ceia"];
 
 // Alias que segue sempre o modelo flash estável mais recente — evita 404s
 // quando a Google descontinua modelos para contas novas.

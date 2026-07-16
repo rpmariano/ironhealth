@@ -178,6 +178,14 @@
 <svg width="0" height="0" style="position:absolute" aria-hidden="true">
   <defs>
     <!-- Cor fixa (Terracota) — a marca não deve seguir a cor de destaque escolhida pelo utilizador. -->
+    <linearGradient id="logoBgGrad" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#4a3a26"/>
+      <stop offset="100%" stop-color="#1f160d"/>
+    </linearGradient>
+    <radialGradient id="logoGlowGrad" cx="30%" cy="22%" r="70%">
+      <stop offset="0%" stop-color="#e8734a" stop-opacity="0.5"/>
+      <stop offset="100%" stop-color="#e8734a" stop-opacity="0"/>
+    </radialGradient>
     <linearGradient id="logoRingGrad" x1="0" y1="0" x2="1" y2="1">
       <stop offset="0%" stop-color="#f5b942"/>
       <stop offset="100%" stop-color="#e8734a"/>
@@ -189,16 +197,17 @@
   <div class="sticky top-0 z-20 bg-neutral-950/90 backdrop-blur border-b border-neutral-800">
     <header class="px-4 pt-4 pb-3 flex items-center justify-between">
       <div class="flex items-center gap-2">
-        <button onclick="handleLogoClick()" class="w-9 h-9 rounded-xl flex items-center justify-center active:scale-95 transition"
-          style="background:rgba(232,115,74,0.14); border:1px solid rgba(232,115,74,0.45);">
-          <svg viewBox="0 0 100 100" class="w-5 h-5">
+        <button onclick="handleLogoClick()" class="w-9 h-9 rounded-xl flex items-center justify-center active:scale-95 transition overflow-hidden">
+          <svg viewBox="0 0 100 100" class="w-full h-full">
+            <rect x="0" y="0" width="100" height="100" rx="24" fill="url(#logoBgGrad)"/>
+            <rect x="0" y="0" width="100" height="100" rx="24" fill="url(#logoGlowGrad)"/>
             <circle cx="50" cy="50" r="26" fill="none" stroke="url(#logoRingGrad)" stroke-width="16"
                     stroke-linecap="round" stroke-dasharray="130 163" transform="rotate(-90 50 50)"/>
             <circle cx="50" cy="24.6" r="9" fill="#f5b942"/>
           </svg>
         </button>
         <div>
-          <h1 class="text-base font-bold tracking-tight text-white leading-none">IronHealth</h1>
+          <h1 class="text-base font-bold tracking-tight text-white leading-none">Iron<span style="color:#e8734a;">Health</span></h1>
           <p id="header-date" class="text-[11px] text-slate-500 leading-none mt-1"></p>
         </div>
       </div>
@@ -1184,12 +1193,14 @@ function renderAuth(){
     <div class="min-h-[75vh] flex items-center justify-center px-2 fade-in">
       <div class="card rounded-2xl p-5 w-full max-w-sm space-y-4">
         <div class="flex items-center gap-2 justify-center">
-          <svg viewBox="0 0 100 100" class="w-7 h-7">
+          <svg viewBox="0 0 100 100" class="w-9 h-9 rounded-xl overflow-hidden">
+            <rect x="0" y="0" width="100" height="100" rx="24" fill="url(#logoBgGrad)"/>
+            <rect x="0" y="0" width="100" height="100" rx="24" fill="url(#logoGlowGrad)"/>
             <circle cx="50" cy="50" r="26" fill="none" stroke="url(#logoRingGrad)" stroke-width="16"
                     stroke-linecap="round" stroke-dasharray="130 163" transform="rotate(-90 50 50)"/>
             <circle cx="50" cy="24.6" r="9" fill="#f5b942"/>
           </svg>
-          <h2 class="text-base font-bold text-white">IronHealth</h2>
+          <h2 class="text-base font-bold text-white">Iron<span style="color:#e8734a;">Health</span></h2>
         </div>
         <p class="text-xs text-slate-500 text-center">${authMode==='signin' ? 'Entra na tua conta' : 'Cria a tua conta'}</p>
 

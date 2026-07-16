@@ -30,17 +30,69 @@
 <script src="https://unpkg.com/lucide@latest/dist/umd/lucide.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
 <style>
-  :root { --accent:#fb923c; --accent-dark:#9a3412; color-scheme: only dark; }
-  html, body { background:#09090b; }
+  :root {
+    --accent:#fb923c; --accent-dark:#9a3412; color-scheme: only dark;
+    /* Base escura fixa (não muda com o tema) para os cartões com texto/ícones
+       brancos por cima — "Hoje" e os módulos — para não ficarem lavados no
+       tema claro, onde as superfícies neutras (--surf-*) ficam claras. */
+    --tile-base-1:#362717;
+    --tile-base-2:#1f160d;
+    --tile-base-3:#4d3a24;
+  }
+
+  /* Superfícies "quentes" derivadas da cor de destaque escolhida (uma das 6 base).
+     color-mix() lê --accent/--accent-dark em tempo real, por isso a textura
+     acompanha qualquer cor que o utilizador escolha, sem precisar de 6 cópias. */
+  html:not(.light) {
+    --surf-950: color-mix(in srgb, var(--accent) 6%,  #100e0c);
+    --surf-900: color-mix(in srgb, var(--accent) 10%, #1c1815);
+    --surf-800: color-mix(in srgb, var(--accent) 14%, #2a2420);
+    --surf-700: color-mix(in srgb, var(--accent) 18%, #38302a);
+    --brd-700:  color-mix(in srgb, var(--accent-dark) 40%, #81674a);
+    --brd-800:  color-mix(in srgb, var(--accent-dark) 32%, #5a4934);
+    --brd-900:  color-mix(in srgb, var(--accent-dark) 26%, #3a2f24);
+    --page-bg:  color-mix(in srgb, var(--accent-dark) 16%, #1c1712);
+    --grain-opacity: 0.08;
+  }
+  html.light {
+    --surf-950: color-mix(in srgb, var(--accent) 4%,  #faf7f1);
+    --surf-900: color-mix(in srgb, var(--accent) 7%,  #f2ece0);
+    --surf-800: color-mix(in srgb, var(--accent) 11%, #e7dcc7);
+    --surf-700: color-mix(in srgb, var(--accent) 15%, #dccdae);
+    --brd-700:  color-mix(in srgb, var(--accent-dark) 22%, #d3c4a4);
+    --brd-800:  color-mix(in srgb, var(--accent-dark) 18%, #ddd0b6);
+    --brd-900:  color-mix(in srgb, var(--accent-dark) 18%, #ddd0b6);
+    --page-bg:  color-mix(in srgb, var(--accent) 5%, #fbf8f3);
+    --grain-opacity: 0.035;
+  }
+
+  html, body { background:var(--page-bg); }
   ::-webkit-scrollbar { width:6px; height:6px; }
-  ::-webkit-scrollbar-thumb { background:#3f3f46; border-radius:9999px; }
+  ::-webkit-scrollbar-thumb { background:var(--brd-700); border-radius:9999px; }
   ::-webkit-scrollbar-track { background:transparent; }
 
-  .card { background:linear-gradient(180deg, rgba(34,34,38,0.95), rgba(20,20,22,0.95)); border:1px solid rgba(82,82,91,0.7); filter:drop-shadow(0 2px 8px rgba(0,0,0,0.35)); }
+  /* Textura de grão por cima de toda a app; intensidade varia por tema */
+  body::before {
+    content:"";
+    position:fixed; inset:0; z-index:0; pointer-events:none;
+    opacity:var(--grain-opacity);
+    mix-blend-mode: overlay;
+    background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='90' height='90'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+  }
+  #root, #app, body > div { position:relative; z-index:1; }
 
-  html:not(.light) [class~="bg-neutral-900"],
-  html:not(.light) [class*="bg-neutral-900/"] { background-color:rgba(43,43,48,0.75) !important; }
-  html:not(.light) [class~="bg-neutral-800"] { background-color:rgba(63,63,70,0.65) !important; }
+  .card { background:linear-gradient(180deg, var(--surf-800), var(--surf-950)); border:1px solid var(--brd-700); filter:drop-shadow(0 2px 8px rgba(0,0,0,0.35)); }
+
+  [class~="bg-neutral-950"],
+  [class*="bg-neutral-950/"] { background-color:var(--surf-950) !important; }
+  [class~="bg-neutral-900"],
+  [class*="bg-neutral-900/"] { background-color:var(--surf-900) !important; }
+  [class~="bg-neutral-800"] { background-color:var(--surf-800) !important; }
+  [class~="bg-neutral-700"] { background-color:var(--surf-700) !important; }
+
+  [class~="border-neutral-700"] { border-color:var(--brd-700) !important; }
+  [class~="border-neutral-800"] { border-color:var(--brd-800) !important; }
+  [class~="border-neutral-900"] { border-color:var(--brd-900) !important; }
 
   .tab-btn.active { color:var(--accent); }
   .tab-btn.active .tab-dot { opacity:1; }
@@ -59,36 +111,27 @@
   .no-scrollbar::-webkit-scrollbar { display:none; }
   .no-scrollbar { scrollbar-width:none; -ms-overflow-style:none; }
 
-  .vertical-btn .vertical-icon { background:#18181b; border:1px solid #27272a; color:#71717a; }
-  .vertical-btn.active .vertical-icon { background:#18181b; border:2px solid var(--accent); color:var(--accent); }
+  .vertical-btn .vertical-icon { background:var(--surf-800); border:1px solid var(--brd-800); color:#a89a86; }
+  .vertical-btn.active .vertical-icon { background:var(--surf-800); border:2px solid var(--accent); color:var(--accent); }
   .vertical-btn.active .vertical-label { color:var(--accent); }
 
-  .accent-swatch.active { box-shadow:0 0 0 2px #09090b, 0 0 0 4px currentColor; }
+  .accent-swatch.active { box-shadow:0 0 0 2px var(--page-bg), 0 0 0 4px currentColor; }
 
-  .theme-swatch { border:1px solid #3f3f46; background:transparent; }
+  .theme-swatch { border:1px solid var(--brd-800); background:transparent; }
   .theme-swatch.active { border-color:var(--accent); background:rgba(251,146,60,0.08); }
   .theme-swatch.active { background:color-mix(in srgb, var(--accent) 10%, transparent); }
 
   /* ===== Tema claro ===== */
   html.light { color-scheme: only light; }
-  html.light, html.light body { background:#ffffff; color:#334155; }
-  html.light .card { background:#ffffff; border-color:#d1d5db; filter:drop-shadow(0 1px 4px rgba(0,0,0,0.08)); }
-  html.light .sticky.top-0 { background:rgba(255,255,255,0.95); }
-  html.light #bottomNav > div { background:rgba(255,255,255,0.97); }
-  html.light ::-webkit-scrollbar-thumb { background:#cbd5e1; }
-
-  html.light [class~="bg-neutral-950"],
-  html.light [class*="bg-neutral-950/"] { background-color:#ffffff !important; }
-  html.light [class~="bg-neutral-900"],
-  html.light [class*="bg-neutral-900/"] { background-color:#f1f5f9 !important; }
-  html.light [class~="bg-neutral-800"] { background-color:#e2e8f0 !important; }
-  html.light [class~="bg-neutral-700"] { background-color:#cbd5e1 !important; }
-
-  html.light [class~="border-neutral-700"] { border-color:#cbd5e1 !important; }
-  html.light [class~="border-neutral-800"] { border-color:#d6dde5 !important; }
-  html.light [class~="border-neutral-900"] { border-color:#d6dde5 !important; }
+  html.light .card { filter:drop-shadow(0 1px 4px rgba(0,0,0,0.08)); }
+  html.light .sticky.top-0 { background:color-mix(in srgb, var(--surf-950) 95%, transparent); }
+  html.light #bottomNav > div { background:color-mix(in srgb, var(--surf-950) 97%, transparent); }
 
   html.light [class~="text-white"] { color:#0f172a !important; }
+  /* Os cartões "Hoje" e de módulo mantêm fundo escuro em ambos os temas
+     (ver --tile-base-*), por isso o texto branco tem de se manter branco
+     mesmo com o tema claro ativo. */
+  html.light .tile-dark [class~="text-white"] { color:#ffffff !important; }
   html.light [class~="text-slate-200"] { color:#1e293b !important; }
   html.light [class~="text-slate-300"] { color:#334155 !important; }
   html.light [class~="text-slate-400"] { color:#475569 !important; }
@@ -103,15 +146,11 @@
 
   html.light .theme-flip-text { color:#0f172a !important; }
 
-  html.light .vertical-btn .vertical-icon { background:#f1f5f9; border-color:#e2e8f0; color:#64748b; }
-  html.light .vertical-btn.active .vertical-icon { background:#f1f5f9; border:2px solid var(--accent); color:var(--accent); }
-  html.light .accent-swatch.active { box-shadow:0 0 0 2px #ffffff, 0 0 0 4px currentColor; }
   html.light .theme-swatch.active { border-color:var(--accent); background:color-mix(in srgb, var(--accent) 12%, transparent); }
 
   /* ===== Coach chat ===== */
   .coach-bubble-user  { background:var(--accent); color:#09090b; border-radius:18px 18px 4px 18px; }
-  .coach-bubble-model { background:rgba(39,39,42,0.85); border:1px solid rgba(82,82,91,0.5); border-radius:18px 18px 18px 4px; }
-  html.light .coach-bubble-model { background:#ffffff; border-color:#cbd5e1; color:#0f172a; }
+  .coach-bubble-model { background:var(--surf-800); border:1px solid var(--brd-800); border-radius:18px 18px 18px 4px; }
   html.light .coach-bubble-user  { color:#09090b; }
 
   /* Markdown inside coach bubbles */
@@ -282,14 +321,34 @@ const VERTICALS = [
 
 // Cor de sistema escolhível no Perfil — 6 opções fixas, tons vibrantes mas não
 // demasiado escuros nem lisos. `dark` é usado no gradiente do cartão "Hoje".
+// Paleta de cores de sistema, organizada por família (usada para agrupar os
+// swatches no Perfil). 'orange' mantém-se como chave de fallback usada noutros
+// pontos do código quando o utilizador ainda não escolheu cor.
 const ACCENT_COLORS = [
-  { key:'blue1', label:'Azul Céu', light:'#38bdf8', dark:'#075985' },
-  { key:'blue2', label:'Azul Índigo', light:'#818cf8', dark:'#3730a3' },
-  { key:'pink', label:'Rosa', light:'#f472b6', dark:'#9d174d' },
-  { key:'yellow', label:'Amarelo', light:'#fbbf24', dark:'#92400e' },
-  { key:'orange', label:'Laranja', light:'#fb923c', dark:'#9a3412' },
-  { key:'green', label:'Verde', light:'#4ade80', dark:'#166534' },
+  { key:'orange',    family:'Quente',   label:'Terracota', light:'#e8734a', dark:'#9a3412' },
+  { key:'amber',     family:'Quente',   label:'Âmbar',     light:'#f5b942', dark:'#92400e' },
+  { key:'coral',     family:'Quente',   label:'Coral',     light:'#fb7185', dark:'#9f1239' },
+  { key:'teal',      family:'Fresco',   label:'Petróleo',  light:'#14b8a6', dark:'#115e59' },
+  { key:'sky',       family:'Fresco',   label:'Azul Céu',  light:'#38bdf8', dark:'#075985' },
+  { key:'steel',     family:'Fresco',   label:'Azul Aço',  light:'#60a5fa', dark:'#1e40af' },
+  { key:'plum',      family:'Vibrante', label:'Ameixa',    light:'#c084fc', dark:'#6b21a8' },
+  { key:'fuchsia',   family:'Vibrante', label:'Fúcsia',    light:'#e879f9', dark:'#86198f' },
+  { key:'pink',      family:'Vibrante', label:'Rosa',      light:'#f472b6', dark:'#9d174d' },
+  { key:'green',     family:'Natural',  label:'Verde',     light:'#4ade80', dark:'#166534' },
+  { key:'lime',      family:'Natural',  label:'Lima',      light:'#a3e635', dark:'#3f6212' },
+  { key:'turquoise', family:'Natural',  label:'Turquesa',  light:'#2dd4bf', dark:'#0f766e' },
 ];
+
+// Agrupa ACCENT_COLORS por família, preservando a ordem de primeira ocorrência.
+function accentFamilies(){
+  const order = [];
+  const map = {};
+  ACCENT_COLORS.forEach(c => {
+    if (!map[c.family]) { map[c.family] = []; order.push(c.family); }
+    map[c.family].push(c);
+  });
+  return order.map(name => ({ name, colors: map[name] }));
+}
 
 /* ============================= ADMIN ============================= */
 const ADMIN_EMAIL = 'rpmariano@gmail.com';
@@ -1571,6 +1630,17 @@ function render(){
   if (activeTab === 'dashboard') requestAnimationFrame(renderDashChart);
 }
 
+// Fundo com o mesmo padrão de brilho do cartão "Hoje" (base escura quente +
+// brilho radial no canto), mas usando a cor de marca de cada módulo em vez da
+// cor de destaque do utilizador — mantém a identidade de cada vertical e, ao
+// mesmo tempo, o mesmo tratamento visual do cartão "Hoje".
+function moduleCardBg(hex){
+  return `background:
+      radial-gradient(120% 140% at 15% 0%, color-mix(in srgb, ${hex} 45%, transparent) 0%, transparent 60%),
+      linear-gradient(135deg, color-mix(in srgb, ${hex} 50%, var(--tile-base-1)) 0%, color-mix(in srgb, ${hex} 30%, var(--tile-base-3)) 100%);
+      border:1px solid var(--brd-700);`;
+}
+
 /* ============================= INÍCIO (visão geral das verticais) ============================= */
 function renderHome(){
   const totals = rangeTotals('hoje');
@@ -1581,7 +1651,10 @@ function renderHome(){
 
   return `
     <div class="space-y-4 fade-in">
-      <div class="rounded-3xl p-5 relative overflow-hidden" style="background:linear-gradient(135deg, var(--accent-dark), var(--accent));">
+      <div class="tile-dark rounded-3xl p-5 relative overflow-hidden" style="background:
+          radial-gradient(120% 140% at 15% 0%, color-mix(in srgb, var(--accent) 40%, transparent) 0%, transparent 60%),
+          linear-gradient(135deg, color-mix(in srgb, var(--accent-dark) 55%, var(--tile-base-1)) 0%, color-mix(in srgb, var(--accent) 30%, var(--tile-base-3)) 100%);
+          border:1px solid var(--brd-700);">
         <div class="relative z-10">
           <p class="text-xs font-semibold text-white/70 uppercase tracking-wide mb-1">Hoje</p>
           <p class="text-3xl font-bold text-white leading-none">${totals.calories.toFixed(0)}<span class="text-base font-semibold"> kcal</span></p>
@@ -1593,7 +1666,7 @@ function renderHome(){
       </div>
 
       <div class="grid grid-cols-2 gap-3">
-        <button onclick="switchVertical('nutricao')" class="rounded-2xl p-4 text-left relative overflow-hidden min-h-[132px]" style="background:linear-gradient(135deg, #065f46, #10b981);">
+        <button onclick="switchVertical('nutricao')" class="tile-dark rounded-2xl p-4 text-left relative overflow-hidden min-h-[132px]" style="${moduleCardBg('#10b981')}">
           <div class="relative z-10 h-full flex flex-col justify-between">
             <i data-lucide="utensils" class="w-6 h-6 text-white/90"></i>
             <div>
@@ -1603,7 +1676,7 @@ function renderHome(){
           </div>
           <i data-lucide="utensils" class="w-20 h-20 absolute -right-2 -bottom-2 text-white/15"></i>
         </button>
-        <button onclick="switchVertical('corpo')" class="rounded-2xl p-4 text-left relative overflow-hidden min-h-[132px]" style="background:linear-gradient(135deg, #5b21b6, #a855f7);">
+        <button onclick="switchVertical('corpo')" class="tile-dark rounded-2xl p-4 text-left relative overflow-hidden min-h-[132px]" style="${moduleCardBg('#a855f7')}">
           <div class="relative z-10 h-full flex flex-col justify-between">
             <i data-lucide="scale" class="w-6 h-6 text-white/90"></i>
             <div>
@@ -1613,7 +1686,7 @@ function renderHome(){
           </div>
           <i data-lucide="scale" class="w-20 h-20 absolute -right-2 -bottom-2 text-white/15"></i>
         </button>
-        <button onclick="${isGymEnabled() ? `switchVertical('ginasio')` : ''}" class="rounded-2xl p-4 text-left relative overflow-hidden min-h-[132px] ${isGymEnabled() ? '' : 'cursor-default'}" style="background:linear-gradient(135deg, #1e3a8a, #6366f1);">
+        <button onclick="${isGymEnabled() ? `switchVertical('ginasio')` : ''}" class="tile-dark rounded-2xl p-4 text-left relative overflow-hidden min-h-[132px] ${isGymEnabled() ? '' : 'cursor-default'}" style="${moduleCardBg('#6366f1')}">
           <div class="relative z-10 h-full flex flex-col justify-between">
             <i data-lucide="dumbbell" class="w-6 h-6 text-white/90"></i>
             <div>
@@ -1623,7 +1696,7 @@ function renderHome(){
           </div>
           <i data-lucide="dumbbell" class="w-20 h-20 absolute -right-2 -bottom-2 text-white/15"></i>
         </button>
-        <button onclick="switchVertical('corrida')" class="rounded-2xl p-4 text-left relative overflow-hidden min-h-[132px]" style="background:linear-gradient(135deg, #9a3412, #f97316);">
+        <button onclick="switchVertical('corrida')" class="tile-dark rounded-2xl p-4 text-left relative overflow-hidden min-h-[132px]" style="${moduleCardBg('#f97316')}">
           <div class="relative z-10 h-full flex flex-col justify-between">
             <i data-lucide="footprints" class="w-6 h-6 text-white/90"></i>
             <div>
@@ -1633,7 +1706,7 @@ function renderHome(){
           </div>
           <i data-lucide="footprints" class="w-20 h-20 absolute -right-2 -bottom-2 text-white/15"></i>
         </button>
-        <button onclick="switchVertical('coach')" class="rounded-2xl p-4 text-left relative overflow-hidden min-h-[132px]" style="background:linear-gradient(135deg, #155e75, #06b6d4);">
+        <button onclick="switchVertical('coach')" class="tile-dark rounded-2xl p-4 text-left relative overflow-hidden min-h-[132px]" style="${moduleCardBg('#06b6d4')}">
           <div class="relative z-10 h-full flex flex-col justify-between">
             <i data-lucide="bot" class="w-6 h-6 text-white/90"></i>
             <div>
@@ -3980,39 +4053,6 @@ function renderPerfil(){
       </div>
 
       <div class="card rounded-2xl p-4">
-        <div class="flex items-center gap-2 mb-3">
-          <i data-lucide="palette" class="w-4 h-4 text-[var(--accent)]"></i>
-          <h2 class="text-sm font-semibold text-white">Cor de Sistema</h2>
-        </div>
-        <div class="grid grid-cols-6 gap-2">
-          ${ACCENT_COLORS.map(c => `
-            <button onclick="selectAccentColor('${c.key}')" title="${c.label}"
-              class="accent-swatch ${p.accent_color===c.key?'active':''} aspect-square rounded-full transition active:scale-90"
-              style="background:${c.light}; color:${c.light};"></button>
-          `).join('')}
-        </div>
-      </div>
-
-      <div class="card rounded-2xl p-4">
-        <div class="flex items-center gap-2 mb-3">
-          <i data-lucide="sun-moon" class="w-4 h-4 text-[var(--accent)]"></i>
-          <h2 class="text-sm font-semibold text-white">Aparência</h2>
-        </div>
-        <div class="grid grid-cols-2 gap-2">
-          <button onclick="selectTheme('dark')" type="button"
-            class="theme-swatch ${(p.theme||'dark')==='dark'?'active':''} rounded-xl py-3 flex flex-col items-center gap-1.5 transition active:scale-[0.97]">
-            <i data-lucide="moon" class="w-5 h-5 text-slate-300"></i>
-            <span class="text-xs font-semibold text-white">Escuro</span>
-          </button>
-          <button onclick="selectTheme('light')" type="button"
-            class="theme-swatch ${p.theme==='light'?'active':''} rounded-xl py-3 flex flex-col items-center gap-1.5 transition active:scale-[0.97]">
-            <i data-lucide="sun" class="w-5 h-5 text-slate-300"></i>
-            <span class="text-xs font-semibold text-white">Claro</span>
-          </button>
-        </div>
-      </div>
-
-      <div class="card rounded-2xl p-4">
         <div class="flex items-center gap-2 mb-1">
           <i data-lucide="bot" class="w-4 h-4 text-[var(--accent)]"></i>
           <h2 class="text-sm font-semibold text-white">Contexto do Coach</h2>
@@ -4034,6 +4074,47 @@ function renderPerfil(){
                  flex items-center justify-center gap-1.5 active:scale-[0.98] transition">
           <i data-lucide="save" class="w-4 h-4"></i> Guardar Contexto
         </button>
+      </div>
+
+      <div class="card rounded-2xl p-4">
+        <div class="flex gap-4">
+          <div class="flex-1 min-w-0">
+            <div class="flex items-center gap-2 mb-3">
+              <i data-lucide="palette" class="w-4 h-4 text-[var(--accent)]"></i>
+              <h2 class="text-sm font-semibold text-white">Cor de Sistema</h2>
+            </div>
+            ${accentFamilies().map(fam => `
+              <div class="mb-3 last:mb-0">
+                <p class="text-[10px] font-semibold text-slate-500 uppercase tracking-wide mb-1.5">${fam.name}</p>
+                <div class="grid grid-cols-3 gap-2">
+                  ${fam.colors.map(c => `
+                    <button onclick="selectAccentColor('${c.key}')" title="${c.label}"
+                      class="accent-swatch ${p.accent_color===c.key?'active':''} aspect-square rounded-full transition active:scale-90"
+                      style="background:${c.light}; color:${c.light};"></button>
+                  `).join('')}
+                </div>
+              </div>
+            `).join('')}
+          </div>
+          <div class="w-24 shrink-0 border-l border-neutral-800 pl-4">
+            <div class="flex items-center gap-1.5 mb-3">
+              <i data-lucide="sun-moon" class="w-4 h-4 text-[var(--accent)]"></i>
+              <h2 class="text-xs font-semibold text-white">Aparência</h2>
+            </div>
+            <div class="space-y-2">
+              <button onclick="selectTheme('dark')" type="button"
+                class="theme-swatch ${(p.theme||'dark')==='dark'?'active':''} w-full rounded-xl py-3 flex flex-col items-center gap-1.5 transition active:scale-[0.97]">
+                <i data-lucide="moon" class="w-5 h-5 text-slate-300"></i>
+                <span class="text-xs font-semibold text-white">Escuro</span>
+              </button>
+              <button onclick="selectTheme('light')" type="button"
+                class="theme-swatch ${p.theme==='light'?'active':''} w-full rounded-xl py-3 flex flex-col items-center gap-1.5 transition active:scale-[0.97]">
+                <i data-lucide="sun" class="w-5 h-5 text-slate-300"></i>
+                <span class="text-xs font-semibold text-white">Claro</span>
+              </button>
+            </div>
+          </div>
+        </div>
       </div>
 
       <div class="card rounded-2xl p-4">

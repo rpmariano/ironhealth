@@ -1497,7 +1497,50 @@ function setActiveVerticalBar(){
   });
 }
 
+// Chave que identifica o ecrã atualmente visível (não cada render, que
+// acontece várias vezes por ecrã por causa de atualizações de estado).
+// Usada para só ajustar o scroll quando o utilizador realmente muda de
+// ecrã, e não sempre que algo dentro do mesmo ecrã é atualizado.
+function currentScreenKey(){
+  if (!currentUser) return 'auth';
+  if (showAdminPanel) return 'admin';
+  if (dataLoading) return 'loading';
+  if (activeVertical === 'nutricao') return `nutricao:${activeTab}`;
+  if (activeVertical === 'corpo') return `corpo:${bodyTab}`;
+  if (activeVertical === 'ginasio') return `ginasio:${gymTab}:${gymScreen}`;
+  return activeVertical;
+}
+
+let lastScreenKey = null;
+
+// Ao mudar de ecrã: o Coach fica sempre no fim da conversa (já tratado no
+// render do Coach), todos os outros ecrãs arrancam no topo — sem isto, o
+// scroll herdava a posição do ecrã anterior dentro do mesmo container.
+function applyScreenEntryScroll(){
+  const key = currentScreenKey();
+  if (key === lastScreenKey) return;
+  lastScreenKey = key;
+  if (activeVertical === 'coach') {
+    scrollCoachToBottom();
+    // Chamado de forma síncrona (sem requestAnimationFrame) para preservar o
+    // gesto do utilizador que despoletou a navegação — em vários browsers
+    // móveis o teclado só abre com foco programático se ainda estiver dentro
+    // do mesmo "user gesture" que originou o clique.
+    const input = document.getElementById('coachInputEl');
+    if (input) input.focus();
+  } else {
+    const main = document.getElementById('tab-content');
+    if (main) main.scrollTop = 0;
+    window.scrollTo(0, 0);
+  }
+}
+
 function render(){
+  renderScreen();
+  applyScreenEntryScroll();
+}
+
+function renderScreen(){
   applyTheme(theme);
   const nav = document.getElementById('bottomNav');
   const headerActions = document.getElementById('headerActions');

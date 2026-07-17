@@ -257,21 +257,30 @@
     </button>
   </div>
 
-  <!-- Barra fixa no fundo: 4 módulos principais + "+" central elevado.
-       Corrida e Ginásio ficam acessíveis pelos cartões do Início. -->
-  <nav id="verticalStrip" class="hidden fixed bottom-0 left-0 right-0 z-30 max-w-md mx-auto grid grid-cols-5 items-center bg-neutral-900/95 backdrop-blur border-t border-neutral-800 pt-1 pb-2">
-    <button onclick="switchVertical('home')" data-vert="home" class="vbar-btn flex flex-col items-center gap-1 py-1.5 text-slate-500 active:scale-95 transition">
-      <i data-lucide="layout-grid" class="w-5 h-5"></i><span class="text-[10px] font-medium">Início</span>
+  <!-- Barra fixa no fundo: os 5 módulos + Início à volta do "+" central
+       elevado. Sem texto (só ícone) para caber tudo — Ginásio mostra-se
+       visível a todos mas só é clicável em contas com a beta ativa
+       (isGymEnabled), tal como já acontecia no cartão do Início. -->
+  <nav id="verticalStrip" class="hidden fixed bottom-0 left-0 right-0 z-30 max-w-md mx-auto grid grid-cols-7 items-center bg-neutral-900/95 backdrop-blur border-t border-neutral-800 pt-1 pb-2">
+    <button onclick="switchVertical('home')" data-vert="home" title="Início" class="vbar-btn flex items-center justify-center py-2 text-slate-500 active:scale-95 transition">
+      <i data-lucide="layout-grid" class="w-5 h-5"></i>
     </button>
-    <button onclick="switchVertical('nutricao')" data-vert="nutricao" class="vbar-btn flex flex-col items-center gap-1 py-1.5 text-slate-500 active:scale-95 transition">
-      <i data-lucide="utensils" class="w-5 h-5"></i><span class="text-[10px] font-medium">Nutrição</span>
+    <button onclick="switchVertical('nutricao')" data-vert="nutricao" title="Nutrição" class="vbar-btn flex items-center justify-center py-2 text-slate-500 active:scale-95 transition">
+      <i data-lucide="utensils" class="w-5 h-5"></i>
+    </button>
+    <button id="vbarGinasio" onclick="isGymEnabled() && switchVertical('ginasio')" data-vert="ginasio" title="Ginásio"
+      class="vbar-btn flex items-center justify-center py-2 text-slate-500 active:scale-95 transition">
+      <i data-lucide="dumbbell" class="w-5 h-5"></i>
     </button>
     <div aria-hidden="true"></div>
-    <button onclick="switchVertical('corpo')" data-vert="corpo" class="vbar-btn flex flex-col items-center gap-1 py-1.5 text-slate-500 active:scale-95 transition">
-      <i data-lucide="scale" class="w-5 h-5"></i><span class="text-[10px] font-medium">Corpo</span>
+    <button onclick="switchVertical('corpo')" data-vert="corpo" title="Corpo" class="vbar-btn flex items-center justify-center py-2 text-slate-500 active:scale-95 transition">
+      <i data-lucide="scale" class="w-5 h-5"></i>
     </button>
-    <button onclick="switchVertical('coach')" data-vert="coach" class="vbar-btn flex flex-col items-center gap-1 py-1.5 text-slate-500 active:scale-95 transition">
-      <i data-lucide="bot" class="w-5 h-5"></i><span class="text-[10px] font-medium">Coach</span>
+    <button onclick="switchVertical('corrida')" data-vert="corrida" title="Corrida" class="vbar-btn flex items-center justify-center py-2 text-slate-500 active:scale-95 transition">
+      <i data-lucide="footprints" class="w-5 h-5"></i>
+    </button>
+    <button onclick="switchVertical('coach')" data-vert="coach" title="Coach" class="vbar-btn flex items-center justify-center py-2 text-slate-500 active:scale-95 transition">
+      <i data-lucide="bot" class="w-5 h-5"></i>
     </button>
     <!-- "+" central elevado (posicionado em absoluto para sobressair da barra). -->
     <button id="fabMainBtn" onclick="toggleFab()" type="button"
@@ -1078,10 +1087,44 @@ function finishManualMeal(){
   render();
 }
 
+// Atualiza a UI das refeições depois de expandir/colapsar: no Calendário
+// atualiza só a lista do dia (evita recriar o calendário todo e repetir a
+// animação de entrada do ecrã); nos outros contextos (ex: refeição manual em
+// construção no Registar) usa o render() normal.
+function refreshMealCardsUI(){
+  if (activeVertical === 'nutricao' && activeTab === 'calendario') refreshCalendarDayMeals();
+  else render();
+}
+
+// Leva o cartão indicado para dentro da área visível — usado ao abrir uma
+// refeição/avaliação para que o utilizador veja logo o conteúdo, em vez de
+// ficar a olhar para a mesma posição de scroll de antes. block:'end' alinha
+// o FUNDO do cartão (onde ficam as ações, ex: "Eliminar refeição") com o
+// fundo do ecrã — com block:'nearest'/'start' o topo (normalmente a foto)
+// ficava visível mas o conteúdo e as ações abaixo saíam do ecrã.
+// As fotos do cartão só ganham a altura final quando terminam de carregar
+// da rede (antes disso não têm dimensão reservada) — sem voltar a ajustar o
+// scroll nesse momento, a posição calculada fica desatualizada assim que a
+// foto aparece e empurra o resto do conteúdo (incluindo o botão de eliminar)
+// para fora do ecrã outra vez.
+function scrollCardIntoView(elId){
+  requestAnimationFrame(() => {
+    const el = document.getElementById(elId);
+    if (!el) return;
+    const reScroll = () => el.scrollIntoView({ behavior: 'smooth', block: 'end' });
+    reScroll();
+    el.querySelectorAll('img').forEach(img => {
+      if (!img.complete) img.addEventListener('load', reScroll, { once: true });
+    });
+  });
+}
+
 async function toggleMealExpand(mealId){
   if (expandedMealId !== mealId) showAddItemForm = false;
-  expandedMealId = expandedMealId === mealId ? null : mealId;
-  render();
+  const opening = expandedMealId !== mealId;
+  expandedMealId = opening ? mealId : null;
+  refreshMealCardsUI();
+  if (opening) scrollCardIntoView(`meal-card-${mealId}`);
   if (expandedMealId) await loadMealPhotoUrls(mealId);
 }
 
@@ -1109,7 +1152,7 @@ async function loadMealPhotoUrls(mealId){
     console.warn('signed urls', e);
     paths.forEach(p => { signedUrlFailed[p] = true; });
   }
-  if (expandedMealId === mealId) render();
+  if (expandedMealId === mealId) refreshMealCardsUI();
 }
 
 function startEditNotes(mealId){
@@ -1495,6 +1538,11 @@ function setActiveVerticalBar(){
   bar.querySelectorAll('.vbar-btn').forEach(btn => {
     btn.classList.toggle('active', !perfilOpen && btn.dataset.vert === activeVertical);
   });
+  // Ginásio em beta fechada: ícone visível a todos (antecipa o lançamento),
+  // mas só clicável/destacado em contas com a beta ativa — tal como já
+  // acontecia no cartão do Início.
+  const ginasioBtn = document.getElementById('vbarGinasio');
+  if (ginasioBtn) ginasioBtn.classList.toggle('opacity-40', !isGymEnabled());
 }
 
 // Chave que identifica o ecrã atualmente visível (não cada render, que
@@ -1974,8 +2022,10 @@ async function deleteBodyAssessment(id){
 }
 
 async function toggleAssessmentExpand(id){
-  expandedAssessmentId = expandedAssessmentId === id ? null : id;
-  refreshBody();
+  const opening = expandedAssessmentId !== id;
+  expandedAssessmentId = opening ? id : null;
+  refreshBodyCalendarDayAssessments();
+  if (opening) scrollCardIntoView(`assessment-card-${id}`);
   if (expandedAssessmentId) await loadAssessmentPhotoUrls(id);
 }
 
@@ -1999,7 +2049,7 @@ async function loadAssessmentPhotoUrls(id){
     console.warn('signed urls', e);
     paths.forEach(p => { signedUrlFailed[p] = true; });
   }
-  if (expandedAssessmentId === id) refreshBody();
+  if (expandedAssessmentId === id) refreshBodyCalendarDayAssessments();
 }
 
 async function updateAssessmentMetric(id, key, rawValue){
@@ -2144,7 +2194,7 @@ function renderAssessmentCard(a){
   };
 
   return `
-    <div class="card rounded-2xl overflow-hidden">
+    <div id="assessment-card-${a.id}" class="card rounded-2xl overflow-hidden">
       <button onclick="toggleAssessmentExpand('${a.id}')" class="w-full flex items-center gap-3 p-3.5 text-left">
         <span class="w-10 h-10 rounded-xl flex items-center justify-center shrink-0 bg-[var(--accent)]/10 border border-[var(--accent)]/30">
           <i data-lucide="scale" class="w-5 h-5 text-[var(--accent)]"></i>
@@ -2172,14 +2222,14 @@ function renderAssessmentCard(a){
           </div>
 
           ${(a.photo_paths && a.photo_paths.length) ? `
-            <div class="grid grid-cols-3 gap-2">
+            <div class="flex flex-wrap gap-2">
               ${a.photo_paths.map(p => signedUrlCache[p]
-                ? `<a href="${signedUrlCache[p]}" target="_blank" rel="noopener"><img src="${signedUrlCache[p]}" class="w-full aspect-square object-cover rounded-lg border border-neutral-800" alt="Print" /></a>`
+                ? `<a href="${signedUrlCache[p]}" target="_blank" rel="noopener" class="shrink-0"><img src="${signedUrlCache[p]}" class="w-20 h-20 object-cover rounded-lg border border-neutral-800" alt="Print" /></a>`
                 : signedUrlFailed[p]
-                  ? `<button onclick="loadAssessmentPhotoUrls('${a.id}')" type="button" class="w-full aspect-square rounded-lg border border-red-500/30 bg-neutral-900 flex flex-col items-center justify-center text-red-400 text-[9px] gap-1 text-center px-1">
+                  ? `<button onclick="loadAssessmentPhotoUrls('${a.id}')" type="button" class="w-20 h-20 shrink-0 rounded-lg border border-red-500/30 bg-neutral-900 flex flex-col items-center justify-center text-red-400 text-[9px] gap-1 text-center px-1">
                       <i data-lucide="refresh-cw" class="w-4 h-4"></i> Tentar de novo
                     </button>`
-                  : `<div class="w-full aspect-square rounded-lg bg-neutral-900 border border-neutral-800 flex items-center justify-center"><i data-lucide="loader-2" class="w-4 h-4 text-slate-600 animate-spin"></i></div>`
+                  : `<div class="w-20 h-20 shrink-0 rounded-lg bg-neutral-900 border border-neutral-800 flex items-center justify-center"><i data-lucide="loader-2" class="w-4 h-4 text-slate-600 animate-spin"></i></div>`
               ).join('')}
             </div>` : ''}
 
@@ -2359,10 +2409,20 @@ function renderBodyCalendario(){
 
       <div class="space-y-3">
         <h2 class="text-xs font-semibold text-slate-500 uppercase tracking-wide px-1">${formatDatePT(bodyCalendarSelectedDate)}</h2>
-        ${renderBodyCalendarDayAssessments()}
+        <div id="bodyCalendarDayAssessments" class="space-y-3">${renderBodyCalendarDayAssessments()}</div>
       </div>
     </div>
   `;
+}
+
+// Espelha refreshCalendarDayMeals: atualiza só a lista de avaliações do dia
+// selecionado, sem recriar o calendário todo nem repetir a animação fade-in
+// do ecrã inteiro a cada expandir/colapsar.
+function refreshBodyCalendarDayAssessments(){
+  const container = document.getElementById('bodyCalendarDayAssessments');
+  if (!container) return;
+  container.innerHTML = renderBodyCalendarDayAssessments();
+  if (window.lucide) lucide.createIcons();
 }
 
 function renderBodyCalendarDayAssessments(){
@@ -3777,7 +3837,7 @@ function renderMealCard(meal){
   const paths = meal.photo_paths || [];
 
   return `
-    <div class="card rounded-2xl overflow-hidden">
+    <div id="meal-card-${meal.id}" class="card rounded-2xl overflow-hidden">
       <button onclick="toggleMealExpand('${meal.id}')" class="w-full flex items-center justify-between p-4 text-left">
         <div class="flex items-center gap-3 min-w-0">
           <div class="w-9 h-9 rounded-xl bg-[var(--accent)]/10 border border-[var(--accent)]/30 flex items-center justify-center shrink-0">
@@ -3797,14 +3857,14 @@ function renderMealCard(meal){
       ${expanded ? `
       <div class="px-4 pb-4 space-y-3 border-t border-neutral-800 pt-3">
         ${paths.length ? `
-          <div class="grid ${paths.length===1?'grid-cols-1':'grid-cols-2'} gap-2">
+          <div class="flex flex-wrap gap-2">
             ${paths.map(p => signedUrlCache[p]
-              ? `<img src="${signedUrlCache[p]}" class="w-full rounded-xl border border-neutral-800 ${paths.length>1?'aspect-square object-cover':''}" alt="Foto" />`
+              ? `<a href="${signedUrlCache[p]}" target="_blank" rel="noopener" class="shrink-0"><img src="${signedUrlCache[p]}" class="w-20 h-20 object-cover rounded-xl border border-neutral-800" alt="Foto" /></a>`
               : signedUrlFailed[p]
-                ? `<button onclick="loadMealPhotoUrls('${meal.id}')" type="button" class="w-full ${paths.length>1?'aspect-square':'h-32'} rounded-xl border border-red-500/30 bg-neutral-900 flex flex-col items-center justify-center text-red-400 text-[10px] gap-1.5 text-center px-2">
-                    <i data-lucide="refresh-cw" class="w-4 h-4"></i> Falhou a carregar<br/>Toca para tentar de novo
+                ? `<button onclick="loadMealPhotoUrls('${meal.id}')" type="button" class="w-20 h-20 shrink-0 rounded-xl border border-red-500/30 bg-neutral-900 flex flex-col items-center justify-center text-red-400 text-[9px] gap-1 text-center px-1">
+                    <i data-lucide="refresh-cw" class="w-4 h-4"></i> Falhou<br/>Tentar de novo
                   </button>`
-                : `<div class="w-full ${paths.length>1?'aspect-square':'h-32'} rounded-xl border border-neutral-800 bg-neutral-900 flex items-center justify-center text-slate-600 text-xs gap-2"><i data-lucide="loader-2" class="w-4 h-4 animate-spin"></i></div>`
+                : `<div class="w-20 h-20 shrink-0 rounded-xl border border-neutral-800 bg-neutral-900 flex items-center justify-center text-slate-600 text-xs"><i data-lucide="loader-2" class="w-4 h-4 animate-spin"></i></div>`
             ).join('')}
           </div>` : ''}
 
@@ -3982,10 +4042,21 @@ function renderCalendario(){
 
       <div class="space-y-3">
         <h2 class="text-xs font-semibold text-slate-500 uppercase tracking-wide px-1">${formatDatePT(calendarSelectedDate)}</h2>
-        ${renderCalendarDayMeals(monthMeals)}
+        <div id="calendarDayMeals" class="space-y-3">${renderCalendarDayMeals(monthMeals)}</div>
       </div>
     </div>
   `;
+}
+
+// Atualiza só a lista de refeições do dia selecionado (sem recriar o
+// calendário todo) — usada ao expandir/colapsar uma refeição no Calendário,
+// para evitar o "piscar" do ecrã inteiro que a re-renderização completa
+// (com a animação fade-in a repetir) causava a cada toque.
+function refreshCalendarDayMeals(){
+  const container = document.getElementById('calendarDayMeals');
+  if (!container) return;
+  container.innerHTML = renderCalendarDayMeals(mealsForMonth(calendarViewMonth));
+  if (window.lucide) lucide.createIcons();
 }
 
 function renderCalendarDayMeals(monthMeals){

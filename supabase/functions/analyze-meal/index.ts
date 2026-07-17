@@ -95,12 +95,20 @@ function buildPrompt(notes: string | null): string {
   return prompt;
 }
 
+// Estados HTTP que a própria Google trata como transitórios (sobrecarga,
+// rate-limit, indisponibilidade momentânea) — vale a pena repetir estes.
+// Erros "permanentes" (400, 401, 403...) passam sempre à primeira para o
+// chamador, porque repetir não muda o resultado.
+const GEMINI_RETRYABLE_STATUSES = new Set([429, 500, 502, 503, 504]);
+
 // fetch com limite de tempo por tentativa + repetições automáticas quando a
-// chamada fica presa (AbortError) ou falha ao nível da rede — não repete
-// respostas HTTP não-2xx do próprio Gemini (esses já são erros "reais",
-// tratados pelo chamador). Ao fim das tentativas, lança um erro com uma
-// mensagem clara para o utilizador em vez de deixar a função ficar pendurada
-// até ao limite rígido da plataforma.
+// chamada fica presa (AbortError), falha ao nível da rede, ou o Gemini
+// devolve um estado transitório (ver GEMINI_RETRYABLE_STATUSES) — por
+// exemplo, confirmámos em produção uma resposta 503 (sobrecarga momentânea)
+// que a app mostrava como erro imediato, mesmo sem qualquer problema de rede
+// ou timeout envolvido. Ao fim das tentativas, devolve a resposta tal como
+// veio (o chamador decide a mensagem) ou lança um erro claro se nem chegou
+// a haver resposta.
 async function fetchGeminiWithTimeout(
   url: string,
   options: RequestInit,
@@ -113,6 +121,10 @@ async function fetchGeminiWithTimeout(
     try {
       const res = await fetch(url, { ...options, signal: controller.signal });
       clearTimeout(timer);
+      if (!res.ok && GEMINI_RETRYABLE_STATUSES.has(res.status) && attempt < retries) {
+        await new Promise((r) => setTimeout(r, 1500));
+        continue;
+      }
       return res;
     } catch (e) {
       clearTimeout(timer);

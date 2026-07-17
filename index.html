@@ -1297,9 +1297,12 @@ async function signOut(){
 }
 
 /* ============================= RENDER GERAL ============================= */
-// Abandona uma refeição manual em construção ao navegar para longe do Registar
-// (a refeição já está gravada, só a sessão de edição na UI é que se fecha).
+// Chamada em todos os pontos de saída do Registar: limpa o rascunho de
+// observações da refeição por foto (não deve sobreviver a sair e voltar ao
+// ecrã) e, se houver uma refeição manual em construção, fecha essa sessão de
+// edição (a refeição em si já está gravada, só a UI é que se fecha).
 function abandonManualMealSession(){
+  mealNotes = '';
   if (!manualMealId) return;
   manualMealId = null;
   expandedMealId = null;

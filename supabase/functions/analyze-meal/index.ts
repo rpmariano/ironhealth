@@ -186,6 +186,8 @@ async function runGeminiItemsRequest(
   parts: unknown[],
   geminiKey: string,
   emptyErrorMessage: string,
+  retries = GEMINI_RETRIES,
+  timeoutMs = GEMINI_TIMEOUT_MS,
   // deno-lint-ignore no-explicit-any
 ): Promise<any[]> {
   const geminiRes = await fetchGeminiWithTimeout(
@@ -201,6 +203,8 @@ async function runGeminiItemsRequest(
         },
       }),
     },
+    timeoutMs,
+    retries,
   );
 
   if (!geminiRes.ok) {
@@ -268,6 +272,10 @@ async function analyzeWithGemini(
 // gramas indicados manualmente pelo utilizador (sem foto). Devolve sempre um
 // único item com quantity_grams igual ao valor pedido, mesmo que o Gemini
 // devolva algo ligeiramente diferente.
+// Mais tentativas que a análise por foto (3 em vez de 1): este pedido é só
+// texto, sem imagens, por isso cada tentativa é rápida — dá para tentar mais
+// vezes num burst de 503s da Google sem se aproximar do limite de ~150s da
+// plataforma (pior caso: 4 tentativas de 20s + esperas ≈ 85s).
 async function analyzeTextItem(
   name: string,
   grams: number,
@@ -279,6 +287,8 @@ async function analyzeTextItem(
     parts,
     geminiKey,
     "Não foi possível estimar valores nutricionais para este alimento. Tenta descrevê-lo de outra forma.",
+    3,
+    20000,
   );
   return { ...items[0], quantity_grams: grams };
 }

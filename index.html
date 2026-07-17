@@ -453,6 +453,10 @@ function applyNavSnapshot(s){
   activeTab = s.activeTab || 'dashboard';
   showAdminPanel = !!s.showAdminPanel;
   closeFab();
+  // O botão "voltar" físico/PWA passa por aqui (não pelas funções switchTab/
+  // switchVertical/etc.) — sem isto, sair do Registar com "voltar" deixava a
+  // refeição manual em construção por resolver (ver abandonManualMealSession).
+  abandonManualMealSession();
   render();
   suppressNavPush = false;
 }
@@ -493,6 +497,9 @@ let manualMealId = null;      // refeição a ser construída manualmente (sem f
 let expandedMealId = null;
 let showAddItemForm = false;
 let addingItem = false; // estimativa Gemini do novo alimento (entrada manual) em curso
+let newItemNameDraft = '';  // rascunho do formulário "Novo Alimento" — tem de sobreviver ao
+let newItemGramsDraft = ''; // render() que corre sempre no fim de submitNewItem (sucesso ou erro)
+let newItemError = null;    // idem: erro de validação/estimativa, para não desaparecer no render seguinte
 let photos = [];              // [{ dataUrl, base64 }] fotos comprimidas prontas a enviar
 const MAX_PHOTOS = 6;
 let selectedMealType = 'almoco';
@@ -874,27 +881,31 @@ async function deleteMeal(mealId){
 
 function toggleAddItemForm(){
   showAddItemForm = !showAddItemForm;
+  newItemNameDraft = '';
+  newItemGramsDraft = '';
+  newItemError = null;
   render();
 }
 
 // Entrada manual: o utilizador só indica o nome do alimento e as gramas — os
 // valores nutricionais são estimados pelo Gemini a partir dessa descrição
 // (mesma lógica da análise por foto, mas a partir de texto), no servidor.
+// Usa variáveis de rascunho (newItemNameDraft/newItemGramsDraft/newItemError)
+// em vez de ler/escrever diretamente no DOM: o render() no fim desta função
+// substitui todo o HTML do cartão, o que apagaria qualquer valor escrito num
+// elemento antigo (nome/gramas/erro ficavam sempre perdidos, mesmo em caso
+// de erro — o pedido parecia "não fazer nada").
 async function submitNewItem(mealId){
   if (addingItem) return;
-  const nameEl = document.getElementById('newItemName');
-  const gramsEl = document.getElementById('newItemGrams');
-  const errEl = document.getElementById('newItemError');
-
-  const name = nameEl.value.trim();
-  const grams = Number(gramsEl.value);
+  const name = newItemNameDraft.trim();
+  const grams = Number(newItemGramsDraft);
 
   if (!name || !(grams > 0)) {
-    errEl.textContent = 'Preenche a descrição e as gramas com valores válidos.';
-    errEl.classList.remove('hidden');
+    newItemError = 'Preenche a descrição e as gramas com valores válidos.';
+    render();
     return;
   }
-  errEl.classList.add('hidden');
+  newItemError = null;
 
   addingItem = true;
   render();
@@ -908,9 +919,10 @@ async function submitNewItem(mealId){
     const found = findMealById(mealId);
     if (found) found.meal.meal_items = [...(found.meal.meal_items || []), data.item];
     showAddItemForm = false;
+    newItemNameDraft = '';
+    newItemGramsDraft = '';
   } catch(e) {
-    errEl.textContent = e.message || 'Falha a estimar valores nutricionais.';
-    errEl.classList.remove('hidden');
+    newItemError = e.message || 'Falha a estimar valores nutricionais.';
   }
   addingItem = false;
   render();
@@ -1297,16 +1309,29 @@ async function signOut(){
 }
 
 /* ============================= RENDER GERAL ============================= */
-// Chamada em todos os pontos de saída do Registar: limpa o rascunho de
-// observações da refeição por foto (não deve sobreviver a sair e voltar ao
-// ecrã) e, se houver uma refeição manual em construção, fecha essa sessão de
-// edição (a refeição em si já está gravada, só a UI é que se fecha).
+// Chamada em todos os pontos de saída do Registar (incluindo o botão "voltar"
+// do browser/PWA, via popstate): limpa o rascunho de observações da refeição
+// por foto (não deve sobreviver a sair e voltar ao ecrã) e, se houver uma
+// refeição manual em construção, decide o que lhe acontece:
+// - sem alimentos adicionados: descarta-a silenciosamente (equivalente a
+//   premir "Cancelar") em vez de deixar uma refeição vazia gravada;
+// - com alimentos adicionados: pergunta se quer manter (já gravados
+//   incrementalmente) ou descartar tudo.
 function abandonManualMealSession(){
   mealNotes = '';
   if (!manualMealId) return;
+  const mealId = manualMealId;
+  const found = findMealById(mealId);
+  const hasItems = !!(found && (found.meal.meal_items || []).length);
   manualMealId = null;
   expandedMealId = null;
   showAddItemForm = false;
+  if (!hasItems) {
+    deleteMeal(mealId);
+    return;
+  }
+  const keep = confirm('Adicionaste alimentos a esta refeição.\n\nOK para guardar a refeição, Cancelar para descartar tudo.');
+  if (!keep) deleteMeal(mealId);
 }
 
 // Troca de vertical (Início / Nutrição / Ginásio / Corrida / Coach).
@@ -3942,12 +3967,14 @@ function renderMealCard(meal){
             <p class="text-xs font-semibold text-[var(--accent)] flex items-center gap-1.5">
               <i data-lucide="plus-circle" class="w-3.5 h-3.5"></i> Novo Alimento
             </p>
-            <input id="newItemName" type="text" placeholder="Descrição do alimento" ${addingItem ? 'disabled' : ''}
+            <input id="newItemName" type="text" placeholder="Descrição do alimento" value="${esc(newItemNameDraft)}"
+              oninput="newItemNameDraft=this.value" ${addingItem ? 'disabled' : ''}
               class="w-full bg-neutral-950 border border-neutral-700 rounded-lg px-2 py-1.5 text-xs text-white placeholder-slate-600 outline-none focus:border-[var(--accent)]/60 disabled:opacity-50" />
-            <input id="newItemGrams" type="number" min="0" step="5" placeholder="Gramas" ${addingItem ? 'disabled' : ''}
+            <input id="newItemGrams" type="number" min="0" step="5" placeholder="Gramas" value="${esc(newItemGramsDraft)}"
+              oninput="newItemGramsDraft=this.value" ${addingItem ? 'disabled' : ''}
               class="w-full bg-neutral-950 border border-neutral-700 rounded-lg px-2 py-1.5 text-xs text-white placeholder-slate-600 outline-none focus:border-[var(--accent)]/60 disabled:opacity-50" />
             <p class="text-[10px] text-slate-600">Os valores nutricionais são estimados automaticamente a partir da descrição.</p>
-            <p id="newItemError" class="hidden text-[11px] text-red-400"></p>
+            ${newItemError ? `<p class="text-[11px] text-red-400">${esc(newItemError)}</p>` : ''}
             <div class="grid grid-cols-2 gap-2 pt-1">
               <button onclick="toggleAddItemForm()" ${addingItem ? 'disabled' : ''} type="button" class="border border-neutral-700 text-slate-300 text-xs font-semibold rounded-lg py-2 disabled:opacity-40">
                 Cancelar

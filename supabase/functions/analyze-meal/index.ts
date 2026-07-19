@@ -180,10 +180,14 @@ function bytesToBase64(bytes: Uint8Array): string {
   return btoa(binary);
 }
 
+// Contagem de tokens de uma chamada ao Gemini (usageMetadata da resposta),
+// usada para estimar o custo real da API — ver admin_logs/painel de custos.
+export type GeminiUsage = { input_tokens: number; output_tokens: number };
+
 // Chama o Gemini com as partes de conteúdo dadas (imagens e/ou texto) e devolve
 // os itens já normalizados a partir do RESPONSE_SCHEMA (ou lança um erro com
-// uma mensagem amigável). Partilhado entre a análise por foto e a estimativa
-// de texto da entrada manual.
+// uma mensagem amigável), junto com os tokens consumidos. Partilhado entre a
+// análise por foto e a estimativa de texto da entrada manual.
 async function runGeminiItemsRequest(
   parts: unknown[],
   geminiKey: string,
@@ -191,7 +195,7 @@ async function runGeminiItemsRequest(
   retries = GEMINI_RETRIES,
   timeoutMs = GEMINI_TIMEOUT_MS,
   // deno-lint-ignore no-explicit-any
-): Promise<any[]> {
+): Promise<{ items: any[]; usage: GeminiUsage }> {
   const geminiRes = await fetchGeminiWithTimeout(
     `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent?key=${geminiKey}`,
     {
@@ -221,6 +225,10 @@ async function runGeminiItemsRequest(
   }
 
   const geminiJson = await geminiRes.json();
+  const usage: GeminiUsage = {
+    input_tokens: Number(geminiJson?.usageMetadata?.promptTokenCount) || 0,
+    output_tokens: Number(geminiJson?.usageMetadata?.candidatesTokenCount) || 0,
+  };
   const rawText = geminiJson?.candidates?.[0]?.content?.parts?.[0]?.text;
   let parsed: { items?: unknown[] };
   try {
@@ -252,18 +260,18 @@ async function runGeminiItemsRequest(
   if (items.length === 0) {
     throw new Error(emptyErrorMessage);
   }
-  return items;
+  return { items, usage };
 }
 
 // Chama o Gemini com as imagens (base64) + observações, devolve os itens
-// já normalizados (ou lança um erro com uma mensagem amigável).
+// já normalizados + tokens consumidos (ou lança um erro com uma mensagem amigável).
 async function analyzeWithGemini(
   images: string[],
   mime: string,
   notes: string | null,
   geminiKey: string,
   // deno-lint-ignore no-explicit-any
-): Promise<any[]> {
+): Promise<{ items: any[]; usage: GeminiUsage }> {
   const parts: unknown[] = [{ text: buildPrompt(notes) }];
   for (const b64 of images) {
     parts.push({ inline_data: { mime_type: mime, data: b64 } });
@@ -288,16 +296,16 @@ async function analyzeTextItem(
   grams: number,
   geminiKey: string,
   // deno-lint-ignore no-explicit-any
-): Promise<any> {
+): Promise<{ item: any; usage: GeminiUsage }> {
   const parts: unknown[] = [{ text: buildTextItemPrompt(name, grams) }];
-  const items = await runGeminiItemsRequest(
+  const { items, usage } = await runGeminiItemsRequest(
     parts,
     geminiKey,
     "Não foi possível estimar valores nutricionais para este alimento. Tenta descrevê-lo de outra forma.",
     3,
     20000,
   );
-  return { ...items[0], quantity_grams: grams };
+  return { item: { ...items[0], quantity_grams: grams }, usage };
 }
 
 Deno.serve(async (req) => {
@@ -357,9 +365,9 @@ Deno.serve(async (req) => {
       if (fetchError) return jsonResponse({ error: `Falha a procurar refeição: ${fetchError.message}` }, 500);
       if (!existingMeal) return jsonResponse({ error: "Refeição não encontrada" }, 404);
 
-      let item;
+      let item, usage: GeminiUsage;
       try {
-        item = await analyzeTextItem(itemName, grams, geminiKey);
+        ({ item, usage } = await analyzeTextItem(itemName, grams, geminiKey));
       } catch (e) {
         return jsonResponse({ error: e instanceof Error ? e.message : "Falha na estimativa." }, 502);
       }
@@ -371,7 +379,7 @@ Deno.serve(async (req) => {
         .single();
       if (itemError) return jsonResponse({ error: `Falha a gravar alimento: ${itemError.message}` }, 500);
 
-      return jsonResponse({ item: savedItem });
+      return jsonResponse({ item: savedItem, usage });
     }
 
     // ── Modo reanálise: meal_id presente ──────────────────────────────
@@ -400,9 +408,9 @@ Deno.serve(async (req) => {
         images.push(bytesToBase64(new Uint8Array(await fileBlob.arrayBuffer())));
       }
 
-      let items;
+      let items: unknown[], usage: GeminiUsage;
       try {
-        items = await analyzeWithGemini(images, "image/jpeg", rawNotes, geminiKey);
+        ({ items, usage } = await analyzeWithGemini(images, "image/jpeg", rawNotes, geminiKey));
       } catch (e) {
         return jsonResponse({ error: e instanceof Error ? e.message : "Falha na reanálise." }, 502);
       }
@@ -412,7 +420,8 @@ Deno.serve(async (req) => {
 
       const { data: savedItems, error: itemsError } = await sb
         .from("meal_items")
-        .insert(items.map((it) => ({ ...it, meal_id: mealId, user_id: userId })))
+        // deno-lint-ignore no-explicit-any
+        .insert((items as any[]).map((it) => ({ ...it, meal_id: mealId, user_id: userId })))
         .select();
       if (itemsError) return jsonResponse({ error: `Falha a gravar itens: ${itemsError.message}` }, 500);
 
@@ -424,7 +433,7 @@ Deno.serve(async (req) => {
         .single();
       if (updateError) return jsonResponse({ error: `Falha a atualizar refeição: ${updateError.message}` }, 500);
 
-      return jsonResponse({ meal: updatedMeal, items: savedItems });
+      return jsonResponse({ meal: updatedMeal, items: savedItems, usage });
     }
 
     // ── Modo normal: nova refeição a partir de fotos ──────────────────
@@ -471,9 +480,9 @@ Deno.serve(async (req) => {
     }
 
     // 2. Análise Gemini — todas as fotos numa só chamada (partes múltiplas)
-    let items;
+    let items: unknown[], usage: GeminiUsage;
     try {
-      items = await analyzeWithGemini(images, mime, rawNotes, geminiKey);
+      ({ items, usage } = await analyzeWithGemini(images, mime, rawNotes, geminiKey));
     } catch (e) {
       await sb.storage.from("meal-photos").remove(photoPaths);
       return jsonResponse({ error: e instanceof Error ? e.message : "Falha na análise." }, 502);
@@ -492,7 +501,8 @@ Deno.serve(async (req) => {
 
     const { data: savedItems, error: itemsError } = await sb
       .from("meal_items")
-      .insert(items.map((it) => ({ ...it, meal_id: meal.id, user_id: userId })))
+      // deno-lint-ignore no-explicit-any
+      .insert((items as any[]).map((it) => ({ ...it, meal_id: meal.id, user_id: userId })))
       .select();
     if (itemsError) {
       await sb.from("meals").delete().eq("id", meal.id);
@@ -500,7 +510,7 @@ Deno.serve(async (req) => {
       return jsonResponse({ error: `Falha a gravar itens: ${itemsError.message}` }, 500);
     }
 
-    return jsonResponse({ meal, items: savedItems });
+    return jsonResponse({ meal, items: savedItems, usage });
   } catch (e) {
     console.error("Erro inesperado:", e);
     return jsonResponse({ error: "Erro inesperado no servidor" }, 500);

@@ -111,6 +111,12 @@
   .tab-btn.active { color:var(--accent); }
   .tab-btn.active .tab-dot { opacity:1; }
 
+  /* Submenu Dashboard/Calendário (Nutrição, Corpo): pílula com indicador que
+     desliza entre as duas opções em vez de trocar instantaneamente de cor. */
+  .seg-thumb { transition: transform .28s cubic-bezier(.4,0,.2,1); }
+  .seg-nav:has(.seg-btn[data-tab="calendario"].active) .seg-thumb { transform: translateX(100%); }
+  .seg-btn.active { color:#09090b !important; }
+
   .range-chip.active { background:var(--accent); color:#09090b; border-color:var(--accent); }
   .mealtype-pill.active { background:var(--accent); color:#09090b; border-color:var(--accent); font-weight:700; }
 
@@ -425,12 +431,19 @@ function isGymEnabled(){ return !!currentUser && currentUser.email === ADMIN_EMA
 
 let lastLogoClickAt = 0;
 let showAdminPanel = false;
-let adminTab = 'overview'; // overview | users | metrics | logs
+let adminTab = 'overview'; // overview | users | metrics | costs | logs
 let adminData = null;      // { users, profiles, meals, coachMsgs, logs }
 let adminLoading = false;
 let adminError = null;
 let adminMetricsRange = 'semana'; // hoje | semana | mes
 let adminSelectedUserId = null;   // null = métricas globais
+
+// Custos reais da API Gemini (tokens de app_logs, ver logEvent/GEMINI_PRICE_*).
+// Consulta própria (não reaproveita adminData.logs, que vem limitado a 300
+// linhas) para o período do mês não ficar cortado em contas com mais eventos.
+let adminCostRange = 'mes'; // hoje | semana | mes
+let adminCostLogs = null;   // [{ event, meta, created_at }]
+let adminCostLoading = false;
 
 /* ============================= ESTADO ============================= */
 let state = { profile:null, meals:[] }; // meals: [{...meal, meal_items:[...]}]
@@ -519,14 +532,14 @@ let savingRun = false;
 // largura na grelha do Início: 'full' = 2 colunas (para os cartões com mais
 // informação/gráfico), 'half' = 1 coluna (o normal).
 const HOME_CARD_DEFS = [
+  { key:'protein_today',  label:'Proteína hoje',        icon:'egg',            module:'Nutrição', size:'half' },
+  { key:'carbs_today',    label:'Hidratos hoje',        icon:'wheat',          module:'Nutrição', size:'half' },
+  { key:'fat_today',      label:'Gordura hoje',         icon:'droplets',       module:'Nutrição', size:'half' },
   { key:'weight_kg',      label:'Peso',                icon:'scale',          module:'Corpo',    size:'half' },
   { key:'body_fat_pct',   label:'Gordura corporal',     icon:'percent',        module:'Corpo',    size:'half' },
   { key:'bmi',            label:'IMC',                  icon:'activity',       module:'Corpo',    size:'half' },
   { key:'muscle_mass_kg', label:'Massa muscular',       icon:'dumbbell',       module:'Corpo',    size:'half' },
   { key:'body_water_pct', label:'Água corporal',        icon:'droplet',        module:'Corpo',    size:'half' },
-  { key:'protein_today',  label:'Proteína hoje',        icon:'egg',            module:'Nutrição', size:'half' },
-  { key:'carbs_today',    label:'Hidratos hoje',        icon:'wheat',          module:'Nutrição', size:'half' },
-  { key:'fat_today',      label:'Gordura hoje',         icon:'droplets',       module:'Nutrição', size:'half' },
   { key:'gym_sessions',   label:'Ginásio · Sessões',    icon:'calendar-check', module:'Ginásio',  size:'full' },
   { key:'gym_volume',     label:'Ginásio · Volume',     icon:'weight',         module:'Ginásio',  size:'full' },
   { key:'corrida_km',     label:'Corrida · Distância',  icon:'footprints',     module:'Corrida',  size:'full' },
@@ -1015,8 +1028,10 @@ async function submitNewItem(mealId){
     showAddItemForm = false;
     newItemNameDraft = '';
     newItemGramsDraft = '';
+    logEvent('success', 'meal_item_estimate', null, { mealId, ...(data.usage || {}) });
   } catch(e) {
     newItemError = e.message || 'Falha a estimar valores nutricionais.';
+    logEvent('error', 'meal_item_estimate', newItemError, { mealId });
   }
   addingItem = false;
   render();
@@ -1152,7 +1167,7 @@ async function analyzeMeal(){
     mealNotes = '';
     expandedMealId = meal.id;
     analyzeSuccess = { mealType: meal.meal_type, date: meal.date, calories: mealNutrients(meal).calories, itemCount: meal.meal_items.length };
-    logEvent('success', 'meal_analysis', null, { mealType: meal.meal_type, date: meal.date, itemCount: meal.meal_items.length });
+    logEvent('success', 'meal_analysis', null, { mealType: meal.meal_type, date: meal.date, itemCount: meal.meal_items.length, ...(data.usage || {}) });
   } catch(e) {
     console.error(e);
     analyzeError = e.message || 'Falha na análise. Tenta novamente.';
@@ -1319,7 +1334,7 @@ async function reanalyzeMeal(mealId){
     }
     editingNotesMealId = null;
     editingNotesDraft = '';
-    logEvent('success', 'meal_reanalysis', null, { mealId });
+    logEvent('success', 'meal_reanalysis', null, { mealId, ...(data.usage || {}) });
   } catch(e) {
     console.error(e);
     reanalyzeError = e.message || 'Falha na reanálise. Tenta novamente.';
@@ -1563,12 +1578,51 @@ function setAdminTab(tab){
   adminTab = tab;
   render();
   if (tab === 'metrics') requestAnimationFrame(renderAdminChart);
+  if (tab === 'costs') loadAdminCostData();
 }
 
 function setAdminMetricsRange(range){
   adminMetricsRange = range;
   render();
   requestAnimationFrame(renderAdminChart);
+}
+
+function setAdminCostRange(range){
+  adminCostRange = range;
+  loadAdminCostData();
+}
+
+// Preço de referência (Gemini 2.5 Flash, plano pago) por milhão de tokens —
+// sujeito a mudar quando o alias gemini-flash-latest migrar de modelo.
+const GEMINI_PRICE_PER_M_INPUT  = 0.30;
+const GEMINI_PRICE_PER_M_OUTPUT = 2.50;
+const GEMINI_COST_EVENT_MODULE = {
+  meal_analysis: 'Nutrição', meal_reanalysis: 'Nutrição', meal_item_estimate: 'Nutrição',
+  body_analysis: 'Corpo', body_reanalysis: 'Corpo',
+  coach_message: 'Coach',
+};
+function geminiCost(inputTokens, outputTokens){
+  return (inputTokens / 1e6) * GEMINI_PRICE_PER_M_INPUT + (outputTokens / 1e6) * GEMINI_PRICE_PER_M_OUTPUT;
+}
+
+async function loadAdminCostData(){
+  adminCostLoading = true; render();
+  try {
+    const { start } = rangeBounds(adminCostRange);
+    const { data, error } = await sb.from('app_logs')
+      .select('event, meta, created_at')
+      .eq('level', 'success')
+      .gte('created_at', `${start}T00:00:00.000Z`)
+      .order('created_at', { ascending:false })
+      .limit(5000);
+    if (error) throw error;
+    adminCostLogs = data || [];
+  } catch(e) {
+    console.error(e);
+    adminCostLogs = [];
+  }
+  adminCostLoading = false;
+  render();
 }
 
 function selectAdminUser(userId){
@@ -2275,11 +2329,23 @@ function toggleHomeEditMode(){
 // vez por render a partir dos dados atuais, e depois filtrado/ordenado pela
 // disposição escolhida pelo utilizador).
 function buildHomeCardsMap(totals, profile){
-  const latest = bodyAssessments[0] || null;
-  const prev = bodyAssessments[1] || null;
+  // Cada avaliação pode não preencher todas as métricas (ex.: só peso numa
+  // pesagem rápida), por isso cada cartão procura a sua própria última
+  // medição — não apenas a última avaliação, que pode não ter esse campo.
+  const lastTwoForMetric = key => {
+    const vals = [];
+    for (const a of bodyAssessments) {
+      if (a[key] !== null && a[key] !== undefined) {
+        vals.push(a[key]);
+        if (vals.length === 2) break;
+      }
+    }
+    return [vals[0] ?? null, vals[1] ?? null];
+  };
   const bodyCard = key => {
     const m = BODY_METRICS.find(x => x.key === key);
-    return bodyMiniStatCard(m, latest ? latest[key] : null, prev ? prev[key] : null, bodyGoal(m));
+    const [latestVal, prevVal] = lastTwoForMetric(key);
+    return bodyMiniStatCard(m, latestVal, prevVal, bodyGoal(m));
   };
   return {
     weight_kg: bodyCard('weight_kg'),
@@ -2644,7 +2710,7 @@ async function analyzeBody(){
     bodyNotes = '';
     expandedAssessmentId = assessment.id;
     bodySuccess = { date: assessment.date };
-    logEvent('success', 'body_analysis', null, { date: assessment.date });
+    logEvent('success', 'body_analysis', null, { date: assessment.date, ...(data.usage || {}) });
   } catch(e) {
     console.error(e);
     bodyError = e.message || 'Falha na análise. Tenta novamente.';
@@ -2667,7 +2733,7 @@ async function reanalyzeBody(id){
     if (error) throw new Error(await edgeFunctionErrorMessage(error, 'Falha na reanálise.'));
     if (data && data.error) throw new Error(data.error);
     Object.assign(a, data.assessment);
-    logEvent('success', 'body_reanalysis', null, { date: a.date });
+    logEvent('success', 'body_reanalysis', null, { date: a.date, ...(data.usage || {}) });
   } catch(e) {
     console.error(e);
     bodyError = e.message || 'Falha na reanálise.';
@@ -3158,29 +3224,31 @@ function renderBodyChart(){
 // porque o Ginásio injeta o seu próprio nav no mesmo #bottomNav e é preciso
 // restaurar este ao voltar à Nutrição.
 const NUTRITION_NAV_HTML = `
-    <div class="max-w-md mx-auto bg-neutral-900/95 backdrop-blur border-t border-neutral-800 grid grid-cols-2">
-      <button onclick="switchTab('dashboard')" data-tab="dashboard" class="tab-btn flex flex-col items-center gap-1 py-2.5 text-slate-500 text-[11px] font-medium">
-        <i data-lucide="layout-dashboard" class="w-5 h-5"></i>Dashboard
-        <span class="tab-dot w-1 h-1 rounded-full bg-[var(--accent)] opacity-0"></span>
-      </button>
-      <button onclick="switchTab('calendario')" data-tab="calendario" class="tab-btn flex flex-col items-center gap-1 py-2.5 text-slate-500 text-[11px] font-medium">
-        <i data-lucide="calendar-days" class="w-5 h-5"></i>Calendário
-        <span class="tab-dot w-1 h-1 rounded-full bg-[var(--accent)] opacity-0"></span>
-      </button>
+    <div class="max-w-md mx-auto bg-neutral-900/95 backdrop-blur border-b border-neutral-800 px-4 py-2.5">
+      <div class="seg-nav relative flex bg-neutral-800 border border-neutral-700 rounded-full p-1">
+        <span class="seg-thumb absolute inset-y-1 left-1 rounded-full bg-[var(--accent)]" style="width:calc(50% - 4px)"></span>
+        <button onclick="switchTab('dashboard')" data-tab="dashboard" class="tab-btn seg-btn relative z-10 flex-1 flex items-center justify-center gap-1.5 py-2 text-[13px] font-semibold rounded-full text-slate-400 transition-colors">
+          <i data-lucide="layout-dashboard" class="w-4 h-4"></i>Dashboard
+        </button>
+        <button onclick="switchTab('calendario')" data-tab="calendario" class="tab-btn seg-btn relative z-10 flex-1 flex items-center justify-center gap-1.5 py-2 text-[13px] font-semibold rounded-full text-slate-400 transition-colors">
+          <i data-lucide="calendar-days" class="w-4 h-4"></i>Calendário
+        </button>
+      </div>
     </div>`;
 
 // Nav inferior da vertical Corpo — mesma estrutura do NUTRITION_NAV_HTML
 // (Dashboard/Calendário; Avaliar só se acede a partir do Calendário/FAB).
 const CORPO_NAV_HTML = `
-    <div class="max-w-md mx-auto bg-neutral-900/95 backdrop-blur border-t border-neutral-800 grid grid-cols-2">
-      <button onclick="switchBodyTab('dashboard')" data-tab="dashboard" class="tab-btn flex flex-col items-center gap-1 py-2.5 text-slate-500 text-[11px] font-medium">
-        <i data-lucide="layout-dashboard" class="w-5 h-5"></i>Dashboard
-        <span class="tab-dot w-1 h-1 rounded-full bg-[var(--accent)] opacity-0"></span>
-      </button>
-      <button onclick="switchBodyTab('calendario')" data-tab="calendario" class="tab-btn flex flex-col items-center gap-1 py-2.5 text-slate-500 text-[11px] font-medium">
-        <i data-lucide="calendar-days" class="w-5 h-5"></i>Calendário
-        <span class="tab-dot w-1 h-1 rounded-full bg-[var(--accent)] opacity-0"></span>
-      </button>
+    <div class="max-w-md mx-auto bg-neutral-900/95 backdrop-blur border-b border-neutral-800 px-4 py-2.5">
+      <div class="seg-nav relative flex bg-neutral-800 border border-neutral-700 rounded-full p-1">
+        <span class="seg-thumb absolute inset-y-1 left-1 rounded-full bg-[var(--accent)]" style="width:calc(50% - 4px)"></span>
+        <button onclick="switchBodyTab('dashboard')" data-tab="dashboard" class="tab-btn seg-btn relative z-10 flex-1 flex items-center justify-center gap-1.5 py-2 text-[13px] font-semibold rounded-full text-slate-400 transition-colors">
+          <i data-lucide="layout-dashboard" class="w-4 h-4"></i>Dashboard
+        </button>
+        <button onclick="switchBodyTab('calendario')" data-tab="calendario" class="tab-btn seg-btn relative z-10 flex-1 flex items-center justify-center gap-1.5 py-2 text-[13px] font-semibold rounded-full text-slate-400 transition-colors">
+          <i data-lucide="calendar-days" class="w-4 h-4"></i>Calendário
+        </button>
+      </div>
     </div>`;
 
 const GYM_TABS = [
@@ -5086,7 +5154,7 @@ async function sendCoachMessage() {
     coachMessages = coachMessages.filter(m => m.id !== '__tmp__');
     coachMessages.push(data.user_message, data.model_message);
     coachSuggestions = Array.isArray(data.suggestions) ? data.suggestions : [];
-    logEvent('success', 'coach_message', null, null);
+    logEvent('success', 'coach_message', null, data.usage || null);
   } catch(e) {
     coachError = e.message || 'Erro inesperado. Tenta novamente.';
     coachMessages = coachMessages.filter(m => m.id !== '__tmp__');
@@ -5112,6 +5180,7 @@ const ADMIN_TABS = [
   { key:'overview', label:'Visão Geral', icon:'layout-grid' },
   { key:'users',    label:'Utilizadores', icon:'users' },
   { key:'metrics',  label:'Métricas', icon:'bar-chart-3' },
+  { key:'costs',    label:'Custos API', icon:'circle-dollar-sign' },
   { key:'logs',     label:'Logs', icon:'scroll-text' },
 ];
 
@@ -5144,6 +5213,7 @@ function renderAdminPanel(){
     adminTab === 'overview' ? renderAdminOverview() :
     adminTab === 'users'    ? renderAdminUsers() :
     adminTab === 'metrics'  ? renderAdminMetrics() :
+    adminTab === 'costs'    ? renderAdminCosts() :
     renderAdminLogs();
 
   return `
@@ -5266,6 +5336,69 @@ function renderAdminMetrics(){
         </div>
         ${(scopeMeals.length || scopeMsgs.length) ? `<canvas id="adminChart" height="190"></canvas>` : `<p class="text-xs text-slate-500">Sem atividade neste período.</p>`}
       </div>
+    </div>
+  `;
+}
+
+// Custo real da API Gemini por módulo, a partir dos tokens gravados em
+// app_logs (ver logEvent nas chamadas a analyze-meal/analyze-body/coach-chat).
+// Eventos sem tokens (falhas antes do Gemini responder) ficam de fora da soma.
+function renderAdminCosts(){
+  const logs = adminCostLogs || [];
+  const byModule = {};
+  let totalIn = 0, totalOut = 0, totalCalls = 0;
+  for (const l of logs) {
+    const meta = l.meta || {};
+    const inTok = Number(meta.input_tokens) || 0;
+    const outTok = Number(meta.output_tokens) || 0;
+    if (!inTok && !outTok) continue;
+    const mod = GEMINI_COST_EVENT_MODULE[l.event] || 'Outro';
+    if (!byModule[mod]) byModule[mod] = { input:0, output:0, calls:0 };
+    byModule[mod].input += inTok;
+    byModule[mod].output += outTok;
+    byModule[mod].calls += 1;
+    totalIn += inTok; totalOut += outTok; totalCalls += 1;
+  }
+  const totalCost = geminiCost(totalIn, totalOut);
+  const modules = Object.entries(byModule).sort((a,b) => geminiCost(b[1].input,b[1].output) - geminiCost(a[1].input,a[1].output));
+
+  return `
+    <div class="space-y-3">
+      <div class="flex gap-2">
+        ${['hoje','semana','mes'].map(r => `
+          <button onclick="setAdminCostRange('${r}')"
+            class="range-chip ${adminCostRange===r?'active':''} flex-1 border border-neutral-700 rounded-xl py-2 text-xs font-semibold text-slate-300 transition">
+            ${r==='hoje'?'Hoje':r==='semana'?'Esta Semana':'Este Mês'}
+          </button>
+        `).join('')}
+      </div>
+
+      ${adminCostLoading ? `
+        <div class="flex items-center justify-center py-10 text-slate-500 text-xs gap-2">
+          <i data-lucide="loader-2" class="w-4 h-4 animate-spin"></i> A carregar...
+        </div>` : `
+        <div class="card rounded-2xl p-4 text-center">
+          <p class="text-[10px] text-slate-500 uppercase tracking-wide mb-1">Custo estimado (Gemini)</p>
+          <p class="text-3xl font-extrabold text-white">$${totalCost.toFixed(4)}</p>
+          <p class="text-[11px] text-slate-500 mt-1">${totalCalls} chamada(s) · ${(totalIn+totalOut).toLocaleString('pt-PT')} tokens</p>
+        </div>
+
+        <div class="space-y-2">
+          ${modules.length === 0
+            ? `<p class="text-xs text-slate-500 text-center py-6">Sem chamadas com dados de tokens neste período.</p>`
+            : modules.map(([mod, v]) => `
+              <div class="card rounded-xl p-3">
+                <div class="flex items-center justify-between mb-1.5">
+                  <p class="text-xs font-semibold text-white">${esc(mod)}</p>
+                  <p class="text-xs font-bold text-[var(--accent)]">$${geminiCost(v.input,v.output).toFixed(4)}</p>
+                </div>
+                <p class="text-[11px] text-slate-500">${v.calls} chamada(s) · ${v.input.toLocaleString('pt-PT')} in / ${v.output.toLocaleString('pt-PT')} out tokens</p>
+              </div>
+            `).join('')}
+        </div>
+
+        <p class="text-[10px] text-slate-600 text-center px-2">Preços de referência: $${GEMINI_PRICE_PER_M_INPUT.toFixed(2)} / milhão tokens de input, $${GEMINI_PRICE_PER_M_OUTPUT.toFixed(2)} / milhão tokens de output (gemini-flash-latest, sujeito a alteração).</p>
+      `}
     </div>
   `;
 }

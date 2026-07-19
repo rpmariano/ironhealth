@@ -179,6 +179,11 @@ $$;
 grant execute on function public.admin_list_users() to authenticated;
 
 -- ============ app_logs: registo de sucesso/erro das operações principais ============
+-- Eventos que chamam o Gemini (meal_analysis, meal_reanalysis,
+-- meal_item_estimate, body_analysis, body_reanalysis, coach_message) gravam
+-- também `meta.input_tokens`/`meta.output_tokens` (de usageMetadata da
+-- resposta) — usados pelo painel admin (aba "Custos API") para estimar o
+-- custo real da API a partir do preço por milhão de tokens do modelo.
 create table app_logs (
   id         uuid        primary key default gen_random_uuid(),
   user_id    uuid        references auth.users(id) on delete set null,

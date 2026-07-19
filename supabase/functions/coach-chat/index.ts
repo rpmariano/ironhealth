@@ -65,6 +65,10 @@ function buildTools(gymEnabled: boolean) {
   return [{ functionDeclarations }];
 }
 
+// Contagem de tokens de uma (ou mais, somadas) chamadas ao Gemini —
+// usada para estimar o custo real da API — ver admin_logs/painel de custos.
+type GeminiUsage = { input_tokens: number; output_tokens: number };
+
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
@@ -558,6 +562,11 @@ async function handler(req: Request): Promise<Response> {
       return res;
     }
 
+    // Soma tokens de TODAS as chamadas ao Gemini neste pedido — o loop de
+    // function calling pode fazer várias idas-e-voltas (cada uma consome
+    // tokens) antes de chegar à resposta final que o utilizador vê.
+    const totalUsage: GeminiUsage = { input_tokens: 0, output_tokens: 0 };
+
     let geminiJson: Record<string, unknown> | undefined;
     for (let round = 0; round <= MAX_TOOL_ROUNDS; round++) {
       const isLastAllowedRound = round === MAX_TOOL_ROUNDS;
@@ -581,6 +590,8 @@ async function handler(req: Request): Promise<Response> {
 
       // deno-lint-ignore no-explicit-any
       const parsedRes: any = await geminiRes.json();
+      totalUsage.input_tokens += Number(parsedRes?.usageMetadata?.promptTokenCount) || 0;
+      totalUsage.output_tokens += Number(parsedRes?.usageMetadata?.candidatesTokenCount) || 0;
       // deno-lint-ignore no-explicit-any
       const parts: any[] = parsedRes?.candidates?.[0]?.content?.parts || [];
       // deno-lint-ignore no-explicit-any
@@ -652,10 +663,11 @@ async function handler(req: Request): Promise<Response> {
         user_message: userMsg,
         model_message: { id: null, role: "model", content: replyText, created_at: new Date().toISOString() },
         suggestions,
+        usage: totalUsage,
       });
     }
 
-    return jsonResponse({ user_message: userMsg, model_message: modelMsg, suggestions });
+    return jsonResponse({ user_message: userMsg, model_message: modelMsg, suggestions, usage: totalUsage });
 
   } catch (e) {
     console.error("Erro inesperado:", e);

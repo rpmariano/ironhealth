@@ -212,15 +212,22 @@ function buildPrompt(notes: string | null, history: unknown[]): string {
   return prompt;
 }
 
+// Contagem de tokens de uma chamada ao Gemini (usageMetadata da resposta),
+// usada para estimar o custo real da API — ver admin_logs/painel de custos.
+type GeminiUsage = { input_tokens: number; output_tokens: number };
+
 // Chama o Gemini com as imagens (base64) + histórico + observações, devolve as
-// métricas normalizadas e o resumo (ou lança um erro com mensagem amigável).
+// métricas normalizadas, o resumo e os tokens consumidos (ou lança um erro
+// com mensagem amigável).
 async function analyzeWithGemini(
   images: string[],
   mime: string,
   notes: string | null,
   history: unknown[],
   geminiKey: string,
-): Promise<{ metrics: Record<string, number | null>; classifications: Record<string, string>; summary: string }> {
+): Promise<
+  { metrics: Record<string, number | null>; classifications: Record<string, string>; summary: string; usage: GeminiUsage }
+> {
   const parts: unknown[] = [{ text: buildPrompt(notes, history) }];
   for (const b64 of images) {
     parts.push({ inline_data: { mime_type: mime, data: b64 } });
@@ -252,6 +259,10 @@ async function analyzeWithGemini(
   }
 
   const geminiJson = await geminiRes.json();
+  const usage: GeminiUsage = {
+    input_tokens: Number(geminiJson?.usageMetadata?.promptTokenCount) || 0,
+    output_tokens: Number(geminiJson?.usageMetadata?.candidatesTokenCount) || 0,
+  };
   const rawText = geminiJson?.candidates?.[0]?.content?.parts?.[0]?.text;
   let parsed: { metrics?: Record<string, unknown>; classifications?: Record<string, unknown>; summary?: unknown };
   try {
@@ -286,7 +297,7 @@ async function analyzeWithGemini(
   }
 
   const summary = typeof parsed.summary === "string" ? parsed.summary.trim() : "";
-  return { metrics, classifications, summary };
+  return { metrics, classifications, summary, usage };
 }
 
 Deno.serve(async (req) => {
@@ -377,7 +388,7 @@ Deno.serve(async (req) => {
         .single();
       if (updateError) return jsonResponse({ error: `Falha a atualizar avaliação: ${updateError.message}` }, 500);
 
-      return jsonResponse({ assessment: updated });
+      return jsonResponse({ assessment: updated, usage: result.usage });
     }
 
     // ── Modo normal: nova avaliação a partir de imagens ────────────────
@@ -458,7 +469,7 @@ Deno.serve(async (req) => {
       return jsonResponse({ error: `Falha a gravar avaliação: ${insertError.message}` }, 500);
     }
 
-    return jsonResponse({ assessment });
+    return jsonResponse({ assessment, usage: result.usage });
   } catch (e) {
     console.error("Erro inesperado:", e);
     return jsonResponse({ error: "Erro inesperado no servidor" }, 500);

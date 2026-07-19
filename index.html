@@ -1947,6 +1947,17 @@ function ringSvg(pct, { size = 96, stroke = 8, color = 'var(--accent)', trackCol
     </svg>`;
 }
 
+// Barra de progresso horizontal — usada onde o anel não se aplica bem por
+// não haver uma meta real definida pelo utilizador (ex.: pace da Corrida,
+// que usa uma escala fixa de referência, não um objetivo do Perfil).
+function gaugeBar(pct, { color = 'var(--accent)' } = {}){
+  const width = Math.max(0, Math.min(100, pct));
+  return `
+    <div class="w-full h-1.5 rounded-full overflow-hidden" style="background:${emptyFillColor()}">
+      <div class="h-full rounded-full" style="width:${width}%;background:${color};transition:width .4s ease"></div>
+    </div>`;
+}
+
 // Cartão principal do Início: substitui o antigo resumo "Hoje" — mesmo papel
 // (leva a Nutrição), mas agora com o anel de progresso e um sinal de estado
 // (macro no alvo / acima da meta) em vez de só um número.
@@ -1997,18 +2008,18 @@ function nutritionHeroCard(totals, profile){
     </button>`;
 }
 
-// Mini-cartão do Corpo (peso / gordura corporal), no mesmo estilo de anel do
-// cartão de calorias, mas em par lado-a-lado. O anel mede "proximidade ao
-// objetivo" (100% = em cima do objetivo); sem objetivo definido, mostra só o
-// valor e a variação desde a última pesagem, sem anel preenchido.
-function bodyMiniRingCard(m, latestVal, prevVal, goal){
+// Mini-cartão do Corpo (peso / gordura corporal / etc.) — anel de progresso.
+// Todas estas métricas têm um objetivo definível pelo utilizador no Perfil,
+// e o anel mede exatamente isso (proximidade ao objetivo) — o formato certo
+// para uma dimensão com meta, ao contrário de módulos sem meta real (ver
+// gaugeBar, usado onde um anel não teria o mesmo significado).
+function bodyMiniStatCard(m, latestVal, prevVal, goal){
   const hasVal = latestVal !== null && latestVal !== undefined;
   const hasGoal = hasVal && goal !== null && goal !== undefined && isFinite(goal) && goal > 0;
   const pct = hasGoal ? Math.max(0, Math.min(100, 100 - Math.abs(latestVal - goal) / goal * 100)) : 0;
 
-  const hasDelta = hasVal && prevVal !== null && prevVal !== undefined;
-  const delta = hasDelta ? (latestVal - prevVal) : null;
-  const improving = hasDelta && m.good !== null ? (m.good === 'up' ? delta > 0 : delta < 0) : null;
+  const delta = (prevVal !== null && prevVal !== undefined) ? (latestVal - prevVal) : null;
+  const improving = delta !== null && m.good !== null ? (m.good === 'up' ? delta > 0 : delta < 0) : null;
   const deltaColor = improving === null ? 'text-slate-500' : improving ? 'text-emerald-400' : 'text-red-400';
   const deltaArrow = delta === null ? '' : (delta > 0 ? '▲' : delta < 0 ? '▼' : '•');
 
@@ -2111,8 +2122,9 @@ function gymVolumeMiniCard(){
     </button>`;
 }
 
-// Cartão opcional: macro específico de hoje (Proteína/Hidratos/Gordura),
-// mesmo estilo de anel dos mini-cartões do Corpo — anel mede % da meta.
+// Cartão opcional: macro específico de hoje (Proteína/Hidratos/Gordura) —
+// anel de progresso: tem meta real definida no Perfil, tal como o Corpo, por
+// isso o anel (proximidade à meta) volta a ser a leitura mais direta aqui.
 function nutrientMiniCard(nutrientKey, label, color, totals, profile){
   const goal = Number(profile[nutrientKey + '_goal']) || 0;
   const value = totals[nutrientKey] || 0;
@@ -2182,9 +2194,8 @@ function kmHomeCard(){
 // ritmo de caminhada/corrida ligeira → 0%) para o anel ter sempre um
 // preenchimento com significado, sem precisar de um objetivo definido pelo
 // utilizador (ao contrário do Peso/Gordura corporal, que usam a meta do
-// Perfil). Cada bucket (5km/10km) fica com o seu mini-anel, lado a lado —
-// mesma família visual dos mini-cartões do Corpo, em vez do texto plano que
-// destoava dos restantes cartões.
+// Perfil). Cada bucket (5km/10km) fica com a sua barra de progresso — a
+// mesma família visual dos macros da Nutrição, em vez de mais um anel.
 function paceQualityPct(paceSec){
   const FAST = 180, SLOW = 480;
   return Math.max(0, Math.min(100, (SLOW - paceSec) / (SLOW - FAST) * 100));
@@ -2194,27 +2205,30 @@ function paceHomeCard(){
   const b10 = bucketPaceTrend(10, 1.5);
   const bucket = (label, b) => {
     if (!b) return `
-      <div class="flex items-center gap-3 flex-1 min-w-0">
-        <div class="relative shrink-0" style="width:52px;height:52px;">${ringSvg(0, { size: 52, stroke: 5, color: '#f97316' })}</div>
-        <div class="min-w-0"><p class="text-[10px] text-slate-500">${label}</p><p class="text-xs text-slate-600 mt-0.5">Sem dados</p></div>
+      <div class="flex-1 min-w-0">
+        <div class="flex items-baseline justify-between gap-2">
+          <p class="text-[10px] text-slate-500">${label}</p>
+          <p class="text-xs text-slate-600">Sem dados</p>
+        </div>
+        ${gaugeBar(0, { color: '#f97316' })}
       </div>`;
     const improving = b.trend === null ? null : b.trend < 0;
     const color = improving === null ? 'text-slate-500' : improving ? 'text-emerald-400' : 'text-red-400';
     const arrow = b.trend === null ? '' : (improving ? '▲' : '▼');
     return `
-      <div class="flex items-center gap-3 flex-1 min-w-0">
-        <div class="relative shrink-0" style="width:52px;height:52px;">${ringSvg(paceQualityPct(b.pace), { size: 52, stroke: 5, color: '#f97316' })}</div>
-        <div class="min-w-0">
+      <div class="flex-1 min-w-0">
+        <div class="flex items-baseline justify-between gap-2 mb-1">
           <p class="text-[10px] text-slate-500">${label}</p>
-          <p class="text-sm font-extrabold text-white leading-tight mt-0.5">${formatPace(b.pace)}</p>
-          ${b.trend !== null ? `<p class="text-[10px] font-semibold ${color}">${arrow}${formatPaceDelta(b.trend)}</p>` : ''}
+          <p class="text-sm font-extrabold text-white leading-none">${formatPace(b.pace)}</p>
         </div>
+        ${gaugeBar(paceQualityPct(b.pace), { color: '#f97316' })}
+        ${b.trend !== null ? `<p class="text-[10px] font-semibold ${color} mt-1 text-right">${arrow}${formatPaceDelta(b.trend)}</p>` : ''}
       </div>`;
   };
   return `
     <button onclick="switchVertical('corrida')" class="w-full text-left rounded-2xl p-3.5 active:scale-[0.98] transition" style="${statCardBg('#f97316')}">
       <p class="text-[10px] font-semibold text-slate-500 uppercase tracking-wide mb-2.5">Corrida · Pace médio</p>
-      <div class="flex items-center gap-3">
+      <div class="flex items-start gap-4">
         ${bucket('5 km', b5)}
         ${bucket('10 km', b10)}
       </div>
@@ -2265,7 +2279,7 @@ function buildHomeCardsMap(totals, profile){
   const prev = bodyAssessments[1] || null;
   const bodyCard = key => {
     const m = BODY_METRICS.find(x => x.key === key);
-    return bodyMiniRingCard(m, latest ? latest[key] : null, prev ? prev[key] : null, bodyGoal(m));
+    return bodyMiniStatCard(m, latest ? latest[key] : null, prev ? prev[key] : null, bodyGoal(m));
   };
   return {
     weight_kg: bodyCard('weight_kg'),

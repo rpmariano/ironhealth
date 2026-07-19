@@ -528,11 +528,15 @@ const HOME_CARD_DEFS = [
   { key:'carbs_today',    label:'Hidratos hoje',        icon:'wheat',          module:'Nutrição', size:'half' },
   { key:'fat_today',      label:'Gordura hoje',         icon:'droplets',       module:'Nutrição', size:'half' },
   { key:'gym_sessions',   label:'Ginásio · Sessões',    icon:'calendar-check', module:'Ginásio',  size:'full' },
-  { key:'gym_volume',     label:'Ginásio · Volume',     icon:'weight',         module:'Ginásio',  size:'half' },
+  { key:'gym_volume',     label:'Ginásio · Volume',     icon:'weight',         module:'Ginásio',  size:'full' },
   { key:'corrida_km',     label:'Corrida · Distância',  icon:'footprints',     module:'Corrida',  size:'full' },
-  { key:'corrida_pace',   label:'Corrida · Pace médio', icon:'gauge',          module:'Corrida',  size:'half' },
+  { key:'corrida_pace',   label:'Corrida · Pace médio', icon:'gauge',          module:'Corrida',  size:'full' },
 ];
-const DEFAULT_HOME_LAYOUT = ['weight_kg', 'body_fat_pct', 'gym_sessions', 'corrida_km', 'corrida_pace'];
+// Ordem fixa (agrupada por módulo) em que os cartões ativos aparecem no
+// Início — o utilizador escolhe QUAIS ativar, não a ordem. Curada para dar
+// prioridade à informação mais relevante de cada módulo num relance.
+const CANONICAL_HOME_ORDER = HOME_CARD_DEFS.map(d => d.key);
+const DEFAULT_HOME_LAYOUT = ['weight_kg', 'body_fat_pct', 'gym_sessions', 'gym_volume', 'corrida_km', 'corrida_pace'];
 let homeEditMode = false;
 let coachLoading  = false;
 let coachError    = null;
@@ -1878,12 +1882,26 @@ function renderScreen(){
   if (activeTab === 'dashboard') requestAnimationFrame(renderDashChart);
 }
 
-// Fundo/relevo partilhado por todos os cartões de estatística do Início: um
-// brilho radial subtil na cor do módulo por cima do gradiente "profundo" já
-// usado em .card, mais uma borda e sombra tingidas da mesma cor — dá a cada
-// módulo uma identidade cromática própria em vez da superfície neutra única
-// que havia antes. A textura de grão global (body::before) já cobre o resto.
+// Fundo/relevo partilhado por todos os cartões de estatística do Início —
+// dá a cada módulo uma identidade cromática própria em vez da superfície
+// neutra única que havia antes. Os dois temas pedem tratamentos opostos:
+// - Escuro: cor forte (brilho radial + gradiente tingido) fica vibrante
+//   sobre o quase-preto sem parecer exagerada — mantido tal como estava.
+// - Claro: a mesma abordagem tingia o cartão inteiro e ficava "colorido de
+//   mais", pouco profissional. Aqui o cartão volta a ser limpo/neutro
+//   (branco, sombra suave discreta) e a cor do módulo fica só como um
+//   detalhe — uma barra fina à esquerda — deixando o destaque para os
+//   números, anéis e setas de tendência lá dentro (já coloridos).
 function statCardBg(color){
+  const isLight = theme === 'light';
+  if (isLight) {
+    return `background:
+        radial-gradient(130% 150% at 100% 0%, color-mix(in srgb, ${color} 10%, transparent) 0%, transparent 60%),
+        linear-gradient(165deg, #ffffff, var(--surf-800));
+      border-style:solid; border-width:1px 1px 1px 3px;
+      border-color: var(--brd-700) var(--brd-700) var(--brd-700) color-mix(in srgb, ${color} 70%, var(--brd-700));
+      box-shadow: 0 1px 2px rgba(15,23,42,0.06), 0 4px 14px -5px rgba(15,23,42,0.16), inset 0 1px 0 rgba(255,255,255,0.6);`;
+  }
   return `background:
       radial-gradient(130% 150% at 100% 0%, color-mix(in srgb, ${color} 22%, transparent) 0%, transparent 60%),
       linear-gradient(165deg, var(--surf-800), var(--surf-950));
@@ -1913,7 +1931,10 @@ function moduleCard({ onclick, icon, color, g1, g2, title, sub, soon }){
 // Anel de progresso em SVG puro (sem lib de gráficos) — usado no cartão de
 // calorias e nos mini-cartões do Corpo. Começa às 12h e avança no sentido dos
 // ponteiros do relógio (rotação -90° no <svg>); o texto sobreposto não roda.
-function ringSvg(pct, { size = 96, stroke = 8, color = 'var(--accent)', trackColor = 'rgba(255,255,255,0.09)' } = {}){
+function emptyFillColor(){
+  return theme === 'light' ? 'rgba(15,23,42,0.10)' : 'rgba(255,255,255,0.09)';
+}
+function ringSvg(pct, { size = 96, stroke = 8, color = 'var(--accent)', trackColor = emptyFillColor() } = {}){
   const r = (size - stroke) / 2;
   const c = size / 2;
   const circumference = 2 * Math.PI * r;
@@ -2039,7 +2060,7 @@ function gymSessionsCard(){
           return `
             <div class="flex flex-col items-center gap-1 flex-1">
               <div class="w-full aspect-square rounded-lg flex items-center justify-center"
-                style="${trained ? 'background:linear-gradient(135deg,#1e3a8a,#6366f1)' : 'background:rgba(255,255,255,0.05)' + (isToday ? ';box-shadow:inset 0 0 0 1.5px #6366f1' : '')}">
+                style="${trained ? 'background:linear-gradient(135deg,#1e3a8a,#6366f1)' : ('background:' + emptyFillColor()) + (isToday ? ';box-shadow:inset 0 0 0 1.5px #6366f1' : '')}">
                 ${trained ? '<i data-lucide="check" class="w-3.5 h-3.5 text-white"></i>' : ''}
               </div>
               <span class="text-[9px] ${isToday ? 'text-white font-bold' : 'text-slate-600'}">${labels[i]}</span>
@@ -2059,25 +2080,33 @@ function gymVolumeLastNDays(n, offsetDays){
   const endISO = end.toISOString().slice(0, 10);
   return gymSessions.filter(s => s.date >= startISO && s.date <= endISO).reduce((sum, s) => sum + sessionVolume(s), 0);
 }
+// Sparkline de barras (volume por semana, últimas 6 semanas) — mesma
+// família visual do cartão "Corrida · Distância", em vez das barrinhas finas
+// de antes que destoavam dos restantes cartões.
 function gymVolumeMiniCard(){
   if (!isGymEnabled()) {
     return moduleCard({ onclick: '', icon: 'weight', color: '#6366f1', g1: '#1e3a8a', g2: '#6366f1',
       title: 'Ginásio', sub: 'Em breve', soon: true });
   }
   const thisWeek = gymVolumeLastNDays(7, 0);
-  const lastWeek = gymVolumeLastNDays(7, 7);
-  const max = Math.max(thisWeek, lastWeek, 1);
-  const bar = (value, color) => `
-    <div class="flex-1 h-1.5 rounded-full overflow-hidden" style="background:rgba(255,255,255,0.08)">
-      <div class="h-full rounded-full" style="width:${Math.max(4, value / max * 100)}%;background:${color}"></div>
-    </div>`;
+  const trend = thisWeek - gymVolumeLastNDays(7, 7);
+  const trendColor = trend > 0 ? 'text-emerald-400' : trend < 0 ? 'text-red-400' : 'text-slate-500';
+  const trendArrow = trend > 0 ? '▲' : trend < 0 ? '▼' : '•';
+
+  const WEEKS = 6;
+  const perWeek = Array.from({ length: WEEKS }, (_, i) => gymVolumeLastNDays(7, (WEEKS - 1 - i) * 7));
+  const maxWeek = Math.max(...perWeek, 1);
+
   return `
-    <button onclick="switchVertical('ginasio')" class="text-left rounded-2xl p-3.5 active:scale-[0.98] transition" style="${statCardBg('#6366f1')}">
-      <p class="text-[10px] font-semibold text-slate-500 uppercase tracking-wide mb-2">Ginásio · Volume</p>
+    <button onclick="switchVertical('ginasio')" class="w-full text-left rounded-2xl p-3.5 active:scale-[0.98] transition" style="${statCardBg('#6366f1')}">
+      <div class="flex items-center justify-between mb-1">
+        <p class="text-[10px] font-semibold text-slate-500 uppercase tracking-wide">Ginásio · Volume</p>
+        ${gymSessions.length ? `<span class="text-[10px] font-semibold ${trendColor}">${trendArrow} ${Math.round(Math.abs(trend))} kg</span>` : ''}
+      </div>
       <p class="text-2xl font-extrabold text-white leading-none">${Math.round(thisWeek)}<span class="text-xs font-semibold text-slate-500"> kg</span></p>
-      <div class="space-y-1 mt-2.5">
-        <div class="flex items-center gap-2"><span class="text-[9px] text-slate-500 w-9 shrink-0">Esta</span>${bar(thisWeek, '#6366f1')}</div>
-        <div class="flex items-center gap-2"><span class="text-[9px] text-slate-500 w-9 shrink-0">Ant.</span>${bar(lastWeek, '#3f3f70')}</div>
+      <p class="text-[10px] text-slate-500 mt-1 mb-3">esta semana · últimas ${WEEKS} semanas abaixo</p>
+      <div class="flex items-end gap-1.5" style="height:28px;">
+        ${perWeek.map(kg => `<div class="flex-1 rounded-sm" style="height:${kg > 0 ? Math.max(4, kg / maxWeek * 28) : 3}px;background:${kg > 0 ? '#6366f1' : emptyFillColor()}"></div>`).join('')}
       </div>
     </button>`;
 }
@@ -2145,39 +2174,61 @@ function kmHomeCard(){
       <p class="text-2xl font-extrabold text-white leading-none">${weekKm.toFixed(1)}<span class="text-xs font-semibold text-slate-500"> km</span></p>
       <p class="text-[10px] text-slate-500 mt-1 mb-3">esta semana · ${monthKm.toFixed(1)} km este mês</p>
       <div class="flex items-end gap-1.5" style="height:28px;">
-        ${perDay.map(km => `<div class="flex-1 rounded-sm" style="height:${km > 0 ? Math.max(4, km / maxDay * 28) : 3}px;background:${km > 0 ? '#f97316' : 'rgba(255,255,255,0.08)'}"></div>`).join('')}
+        ${perDay.map(km => `<div class="flex-1 rounded-sm" style="height:${km > 0 ? Math.max(4, km / maxDay * 28) : 3}px;background:${km > 0 ? '#f97316' : emptyFillColor()}"></div>`).join('')}
       </div>
     </button>`;
+}
+// Escala fixa de referência (3:00/km = ritmo muito rápido → 100%; 8:00/km =
+// ritmo de caminhada/corrida ligeira → 0%) para o anel ter sempre um
+// preenchimento com significado, sem precisar de um objetivo definido pelo
+// utilizador (ao contrário do Peso/Gordura corporal, que usam a meta do
+// Perfil). Cada bucket (5km/10km) fica com o seu mini-anel, lado a lado —
+// mesma família visual dos mini-cartões do Corpo, em vez do texto plano que
+// destoava dos restantes cartões.
+function paceQualityPct(paceSec){
+  const FAST = 180, SLOW = 480;
+  return Math.max(0, Math.min(100, (SLOW - paceSec) / (SLOW - FAST) * 100));
 }
 function paceHomeCard(){
   const b5 = bucketPaceTrend(5, 0.75);
   const b10 = bucketPaceTrend(10, 1.5);
-  const line = (label, b) => {
-    if (!b) return `<div class="flex items-center justify-between mt-1.5"><span class="text-[11px] text-slate-500">${label}</span><span class="text-[11px] text-slate-600">Sem dados</span></div>`;
+  const bucket = (label, b) => {
+    if (!b) return `
+      <div class="flex items-center gap-3 flex-1 min-w-0">
+        <div class="relative shrink-0" style="width:52px;height:52px;">${ringSvg(0, { size: 52, stroke: 5, color: '#f97316' })}</div>
+        <div class="min-w-0"><p class="text-[10px] text-slate-500">${label}</p><p class="text-xs text-slate-600 mt-0.5">Sem dados</p></div>
+      </div>`;
     const improving = b.trend === null ? null : b.trend < 0;
     const color = improving === null ? 'text-slate-500' : improving ? 'text-emerald-400' : 'text-red-400';
     const arrow = b.trend === null ? '' : (improving ? '▲' : '▼');
-    return `<div class="flex items-center justify-between mt-1.5">
-      <span class="text-[11px] text-slate-500">${label}</span>
-      <span class="text-sm font-bold text-white">${formatPace(b.pace)}${b.trend !== null ? ` <span class="text-[10px] font-semibold ${color}">${arrow}${formatPaceDelta(b.trend)}</span>` : ''}</span>
-    </div>`;
+    return `
+      <div class="flex items-center gap-3 flex-1 min-w-0">
+        <div class="relative shrink-0" style="width:52px;height:52px;">${ringSvg(paceQualityPct(b.pace), { size: 52, stroke: 5, color: '#f97316' })}</div>
+        <div class="min-w-0">
+          <p class="text-[10px] text-slate-500">${label}</p>
+          <p class="text-sm font-extrabold text-white leading-tight mt-0.5">${formatPace(b.pace)}</p>
+          ${b.trend !== null ? `<p class="text-[10px] font-semibold ${color}">${arrow}${formatPaceDelta(b.trend)}</p>` : ''}
+        </div>
+      </div>`;
   };
   return `
-    <button onclick="switchVertical('corrida')" class="text-left rounded-2xl p-3.5 active:scale-[0.98] transition" style="${statCardBg('#f97316')}">
-      <p class="text-[10px] font-semibold text-slate-500 uppercase tracking-wide mb-1">Corrida · Pace médio</p>
-      ${line('5 km', b5)}
-      ${line('10 km', b10)}
+    <button onclick="switchVertical('corrida')" class="w-full text-left rounded-2xl p-3.5 active:scale-[0.98] transition" style="${statCardBg('#f97316')}">
+      <p class="text-[10px] font-semibold text-slate-500 uppercase tracking-wide mb-2.5">Corrida · Pace médio</p>
+      <div class="flex items-center gap-3">
+        ${bucket('5 km', b5)}
+        ${bucket('10 km', b10)}
+      </div>
     </button>`;
 }
 
-// Disposição ativa: array ordenado de chaves de HOME_CARD_DEFS guardado no
-// perfil. Chaves desconhecidas (ex.: de uma versão futura/antiga) são
+// Cartões ativos (o utilizador só escolhe QUAIS, não a ordem — ver
+// CANONICAL_HOME_ORDER) devolvidos sempre pela mesma ordem fixa, agrupada
+// por módulo. Chaves desconhecidas (ex.: de uma versão futura/antiga) são
 // ignoradas em vez de rebentar o render.
 function currentHomeLayout(){
   const saved = state.profile && Array.isArray(state.profile.home_layout) ? state.profile.home_layout : null;
-  const layout = (saved && saved.length) ? saved : DEFAULT_HOME_LAYOUT;
-  const validKeys = new Set(HOME_CARD_DEFS.map(d => d.key));
-  return layout.filter(k => validKeys.has(k));
+  const activeSet = new Set((saved && saved.length) ? saved : DEFAULT_HOME_LAYOUT);
+  return CANONICAL_HOME_ORDER.filter(k => activeSet.has(k));
 }
 
 async function saveHomeLayout(next){
@@ -2195,18 +2246,11 @@ async function saveHomeLayout(next){
   }
 }
 function toggleHomeCard(key){
-  const layout = currentHomeLayout().slice();
-  const idx = layout.indexOf(key);
-  if (idx === -1) layout.push(key); else layout.splice(idx, 1);
-  saveHomeLayout(layout);
-}
-function moveHomeCard(key, dir){
-  const layout = currentHomeLayout().slice();
-  const idx = layout.indexOf(key);
-  const newIdx = idx + dir;
-  if (idx === -1 || newIdx < 0 || newIdx >= layout.length) return;
-  [layout[idx], layout[newIdx]] = [layout[newIdx], layout[idx]];
-  saveHomeLayout(layout);
+  const active = new Set(currentHomeLayout());
+  if (active.has(key)) active.delete(key); else active.add(key);
+  // Guarda-se um array (esquema simples), mas a ordem de exibição vem sempre
+  // de CANONICAL_HOME_ORDER — o array aqui é só o conjunto de chaves ativas.
+  saveHomeLayout(CANONICAL_HOME_ORDER.filter(k => active.has(k)));
 }
 function toggleHomeEditMode(){
   homeEditMode = !homeEditMode;
@@ -2239,39 +2283,24 @@ function buildHomeCardsMap(totals, profile){
   };
 }
 
-// Painel de "Personalizar Início": lista os 12 cartões opcionais (ativos
-// primeiro, na ordem escolhida), com um interruptor para ativar/desativar e
-// setas para reordenar — sem arrastar, para funcionar de forma fiável em
-// qualquer ecrã tátil.
-function homeCardRow(d, active, idx, lastIdx){
+// Painel de "Personalizar Início": os 12 cartões opcionais agrupados por
+// módulo, cada um com um interruptor para ativar/desativar. A ordem de
+// exibição é sempre fixa (CANONICAL_HOME_ORDER) — só a seleção é do
+// utilizador, por isso não há setas nem drag aqui.
+function homeCardRow(d, active){
   return `
     <div class="flex items-center gap-2 bg-neutral-900/60 border border-neutral-800 rounded-xl px-2.5 py-2">
       <i data-lucide="${d.icon}" class="w-4 h-4 text-slate-400 shrink-0"></i>
       <span class="text-xs text-white flex-1 truncate">${d.label}</span>
-      ${active ? `
-        <button onclick="moveHomeCard('${d.key}',-1)" ${idx === 0 ? 'disabled' : ''} type="button" class="text-slate-500 disabled:opacity-25 p-1">
-          <i data-lucide="chevron-up" class="w-3.5 h-3.5"></i>
-        </button>
-        <button onclick="moveHomeCard('${d.key}',1)" ${idx === lastIdx ? 'disabled' : ''} type="button" class="text-slate-500 disabled:opacity-25 p-1">
-          <i data-lucide="chevron-down" class="w-3.5 h-3.5"></i>
-        </button>
-      ` : ''}
       <button onclick="toggleHomeCard('${d.key}')" type="button"
         class="w-9 h-5 rounded-full relative transition shrink-0 ${active ? 'bg-[var(--accent)]' : 'bg-neutral-700'}">
         <span class="absolute top-0.5 ${active ? 'left-4' : 'left-0.5'} w-4 h-4 rounded-full bg-white transition-all"></span>
       </button>
     </div>`;
 }
-// Ativos: pela ordem escolhida pelo utilizador (é a posição real no Início,
-// não faz sentido agrupar por módulo aqui). Inativos: agrupados por módulo
-// (Nutrição/Corpo/Ginásio/Corrida) com um cabeçalho, para serem fáceis de
-// encontrar quando a lista cresce.
 function renderHomeEditPanel(){
-  const layout = currentHomeLayout();
-  const activeSet = new Set(layout);
-  const activeDefs = layout.map(k => HOME_CARD_DEFS.find(d => d.key === k)).filter(Boolean);
-  const inactiveDefs = HOME_CARD_DEFS.filter(d => !activeSet.has(d.key));
-  const modules = [...new Set(inactiveDefs.map(d => d.module))];
+  const activeSet = new Set(currentHomeLayout());
+  const modules = [...new Set(HOME_CARD_DEFS.map(d => d.module))];
 
   return `
     <div class="rounded-2xl p-4" style="${statCardBg('var(--accent)')}">
@@ -2279,18 +2308,12 @@ function renderHomeEditPanel(){
         <h2 class="text-sm font-bold text-white">Personalizar Início</h2>
         <button onclick="toggleHomeEditMode()" class="text-xs font-semibold text-[var(--accent)]">Concluir</button>
       </div>
-      <p class="text-[11px] text-slate-500 mb-3 leading-relaxed">Ativa os cartões que queres ver e usa as setas para escolher a ordem. O cartão de calorias é sempre o primeiro e não se pode desativar.</p>
-
-      ${activeDefs.length ? `
-        <p class="text-[10px] font-semibold text-slate-500 uppercase tracking-wide mb-1.5">Ativos, por esta ordem</p>
-        <div class="space-y-1.5 mb-3">
-          ${activeDefs.map(d => homeCardRow(d, true, layout.indexOf(d.key), layout.length - 1)).join('')}
-        </div>` : ''}
+      <p class="text-[11px] text-slate-500 mb-3 leading-relaxed">Escolhe os cartões que queres ver. A posição é sempre agrupada por módulo — o cartão de calorias é sempre o primeiro e não se pode desativar.</p>
 
       ${modules.map(mod => `
         <p class="text-[10px] font-semibold text-slate-500 uppercase tracking-wide mb-1.5">${mod}</p>
         <div class="space-y-1.5 mb-3">
-          ${inactiveDefs.filter(d => d.module === mod).map(d => homeCardRow(d, false, -1, -1)).join('')}
+          ${HOME_CARD_DEFS.filter(d => d.module === mod).map(d => homeCardRow(d, activeSet.has(d.key))).join('')}
         </div>`).join('')}
     </div>`;
 }

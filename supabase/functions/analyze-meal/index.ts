@@ -112,11 +112,13 @@ function buildTextItemPrompt(name: string, grams: number): string {
   );
 }
 
-// Estados HTTP que a própria Google trata como transitórios (sobrecarga,
-// rate-limit, indisponibilidade momentânea) — vale a pena repetir estes.
-// Erros "permanentes" (400, 401, 403...) passam sempre à primeira para o
-// chamador, porque repetir não muda o resultado.
-const GEMINI_RETRYABLE_STATUSES = new Set([429, 500, 502, 503, 504]);
+// Estados HTTP de sobrecarga momentânea do lado da Google (500/502/503/504) —
+// vale a pena repetir estes, porque costumam resolver-se à segunda. O 429
+// (limite de pedidos excedido) fica DE FORA de propósito: repetir logo a
+// seguir só volta a bater no mesmo limite por minuto — e até o acelera — por
+// isso passa já ao chamador com uma mensagem clara. Erros "permanentes"
+// (400, 401, 403...) também passam sempre à primeira.
+const GEMINI_RETRYABLE_STATUSES = new Set([500, 502, 503, 504]);
 
 // fetch com limite de tempo por tentativa + repetições automáticas quando a
 // chamada fica presa (AbortError), falha ao nível da rede, ou o Gemini
@@ -210,6 +212,11 @@ async function runGeminiItemsRequest(
   if (!geminiRes.ok) {
     const errText = await geminiRes.text();
     console.error("Gemini error:", geminiRes.status, errText);
+    if (geminiRes.status === 429) {
+      throw new Error(
+        "O Gemini atingiu o limite de pedidos gratuitos neste momento. Espera um pouco e tenta novamente.",
+      );
+    }
     throw new Error(`Análise falhou (Gemini ${geminiRes.status}). Tenta novamente.`);
   }
 

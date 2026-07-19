@@ -135,6 +135,16 @@
   .theme-swatch { border:1px solid var(--brd-800); background:transparent; }
   .theme-swatch.active { border-color:var(--accent); background:color-mix(in srgb, var(--accent) 10%, transparent); }
 
+  /* Os tons mais escuros da paleta slate do Tailwind (500/600) foram pensados
+     para fundos médios, não para o quase-preto dos nossos --surf-900/950 —
+     sobre esse fundo ficam com pouco contraste e difíceis de ler (ex.: as
+     legendas e placeholders no módulo Corpo). Aclara-os no tema escuro
+     (default da app), espelhando o ajuste já feito para o tema claro abaixo.
+     text-slate-400 já tem contraste suficiente e fica como está. */
+  [class~="text-slate-600"] { color:#8b95a3 !important; }
+  [class~="text-slate-500"] { color:#9aa4b1 !important; }
+  [class~="placeholder-slate-600"]::placeholder { color:#5f6773 !important; }
+
   /* ===== Tema claro ===== */
   html.light { color-scheme: only light; }
   html.light .card { filter:drop-shadow(0 1px 4px rgba(0,0,0,0.08)); }
@@ -246,10 +256,11 @@
       <span class="w-7 h-7 rounded-full flex items-center justify-center text-white shrink-0" style="background:linear-gradient(135deg,#5b21b6,#a855f7);"><i data-lucide="scale" class="w-3.5 h-3.5"></i></span>
       <span class="text-xs font-semibold text-white whitespace-nowrap">Nova avaliação</span>
     </button>
-    <div class="flex items-center gap-2 bg-neutral-900/60 border border-neutral-800 pl-2.5 pr-3.5 py-2 rounded-full opacity-50">
+    <button onclick="fabCreateRun()" type="button"
+      class="flex items-center gap-2 bg-neutral-900 border border-neutral-800 pl-2.5 pr-3.5 py-2 rounded-full shadow-lg active:scale-95 transition">
       <span class="w-7 h-7 rounded-full flex items-center justify-center text-white shrink-0" style="background:linear-gradient(135deg,#9a3412,#f97316);"><i data-lucide="footprints" class="w-3.5 h-3.5"></i></span>
-      <span class="text-xs font-semibold text-slate-400 whitespace-nowrap">Nova corrida <span class="text-[9px] uppercase text-slate-500">· em breve</span></span>
-    </div>
+      <span class="text-xs font-semibold text-white whitespace-nowrap">Nova corrida</span>
+    </button>
     <button id="fabWorkoutBtn" onclick="fabStartWorkout()" type="button"
       class="flex items-center gap-2 bg-neutral-900 border border-neutral-800 pl-2.5 pr-3.5 py-2 rounded-full shadow-lg active:scale-95 transition">
       <span class="w-7 h-7 rounded-full flex items-center justify-center text-white shrink-0" style="background:linear-gradient(135deg,#1e3a8a,#6366f1);"><i data-lucide="dumbbell" class="w-3.5 h-3.5"></i></span>
@@ -489,6 +500,40 @@ let gymChartExercise = null;      // exercício selecionado para a progressão
 let gymCharts = { vol: null, ex: null }; // instâncias Chart.js (destruídas antes de recriar)
 
 let coachMessages = []; // { id, role, content, created_at }
+
+/* ===== Estado da vertical Corrida ===== */
+let runs = [];              // corridas registadas (id, date, distance_km, duration_seconds, notes)
+let runDate = todayISO();   // rascunho do formulário "Nova corrida"
+let runDistanceDraft = '';
+let runDurationDraft = '';  // minutos (aceita decimais, ex.: 32.5)
+let runNotesDraft = '';
+let runError = null;
+let savingRun = false;
+
+/* ===== Cartões personalizáveis do Início ===== */
+// Catálogo de cartões que o utilizador pode ativar/desativar e reordenar
+// (ver "Personalizar Início"). O cartão de calorias fica sempre fixo em
+// primeiro e não faz parte desta lista.
+// `module` agrupa os cartões no painel "Personalizar" (secção dos inativos —
+// os ativos ficam pela ordem que o utilizador escolheu). `size` controla a
+// largura na grelha do Início: 'full' = 2 colunas (para os cartões com mais
+// informação/gráfico), 'half' = 1 coluna (o normal).
+const HOME_CARD_DEFS = [
+  { key:'weight_kg',      label:'Peso',                icon:'scale',          module:'Corpo',    size:'half' },
+  { key:'body_fat_pct',   label:'Gordura corporal',     icon:'percent',        module:'Corpo',    size:'half' },
+  { key:'bmi',            label:'IMC',                  icon:'activity',       module:'Corpo',    size:'half' },
+  { key:'muscle_mass_kg', label:'Massa muscular',       icon:'dumbbell',       module:'Corpo',    size:'half' },
+  { key:'body_water_pct', label:'Água corporal',        icon:'droplet',        module:'Corpo',    size:'half' },
+  { key:'protein_today',  label:'Proteína hoje',        icon:'egg',            module:'Nutrição', size:'half' },
+  { key:'carbs_today',    label:'Hidratos hoje',        icon:'wheat',          module:'Nutrição', size:'half' },
+  { key:'fat_today',      label:'Gordura hoje',         icon:'droplets',       module:'Nutrição', size:'half' },
+  { key:'gym_sessions',   label:'Ginásio · Sessões',    icon:'calendar-check', module:'Ginásio',  size:'full' },
+  { key:'gym_volume',     label:'Ginásio · Volume',     icon:'weight',         module:'Ginásio',  size:'half' },
+  { key:'corrida_km',     label:'Corrida · Distância',  icon:'footprints',     module:'Corrida',  size:'full' },
+  { key:'corrida_pace',   label:'Corrida · Pace médio', icon:'gauge',          module:'Corrida',  size:'half' },
+];
+const DEFAULT_HOME_LAYOUT = ['weight_kg', 'body_fat_pct', 'gym_sessions', 'corrida_km', 'corrida_pace'];
+let homeEditMode = false;
 let coachLoading  = false;
 let coachError    = null;
 let coachSuggestions = []; // perguntas de seguimento sugeridas pela última resposta
@@ -672,6 +717,42 @@ function rangeTotals(range){
   return total;
 }
 
+/* ============================= CORRIDA (helpers) ============================= */
+function runsInRange(range){
+  const { start, end } = rangeBounds(range);
+  return runs.filter(r => r.date >= start && r.date <= end);
+}
+function totalKm(list){ return list.reduce((sum, r) => sum + Number(r.distance_km || 0), 0); }
+function paceSecPerKm(run){ return run.duration_seconds / run.distance_km; }
+function formatPace(secPerKm){
+  if (!isFinite(secPerKm) || secPerKm <= 0) return '—';
+  const m = Math.floor(secPerKm / 60);
+  const s = Math.round(secPerKm % 60);
+  return `${m}:${String(s).padStart(2,'0')}/km`;
+}
+function formatDuration(totalSeconds){
+  const h = Math.floor(totalSeconds / 3600);
+  const m = Math.floor((totalSeconds % 3600) / 60);
+  const s = Math.round(totalSeconds % 60);
+  return h > 0 ? `${h}:${String(m).padStart(2,'0')}:${String(s).padStart(2,'0')}` : `${m}:${String(s).padStart(2,'0')}`;
+}
+// Corridas cuja distância anda perto de `target` km (ex.: 5 ou 10), para medir
+// o pace médio "aos 5km"/"aos 10km" tal como um corredor pensaria nisso —
+// comparar o pace de uma corrida de 5km com uma de 15km não faz sentido.
+function runsNearDistance(target, tolerance){
+  return runs.filter(r => Math.abs(Number(r.distance_km) - target) <= tolerance)
+    .sort((a,b) => (b.date + (b.created_at||'')).localeCompare(a.date + (a.created_at||'')));
+}
+// Pace médio do bucket (mais recente primeiro) + variação face ao pace médio
+// anterior a essa corrida, para dar indicação de tendência (pace mais baixo = melhoria).
+function bucketPaceTrend(target, tolerance){
+  const list = runsNearDistance(target, tolerance);
+  if (list.length === 0) return null;
+  const latestPace = paceSecPerKm(list[0]);
+  const trend = list.length > 1 ? latestPace - paceSecPerKm(list[1]) : null;
+  return { pace: latestPace, trend, count: list.length };
+}
+
 /* ============================= DADOS ============================= */
 async function loadAllData(){
   dataLoading = true; render();
@@ -719,6 +800,15 @@ async function loadAllData(){
       .order('date', { ascending: false })
       .order('created_at', { ascending: false });
     bodyAssessments = assessments || [];
+
+    // Corridas — histórico completo (poucas linhas por utilizador, tal como Corpo).
+    const { data: runsData } = await sb
+      .from('runs')
+      .select('*')
+      .eq('user_id', userId)
+      .order('date', { ascending: false })
+      .order('created_at', { ascending: false });
+    runs = runsData || [];
 
     // Ginásio em beta fechada — só carrega dados para quem tem acesso, para
     // não gastar queries à toa nas contas que ainda não veem a vertical.
@@ -1736,7 +1826,18 @@ function renderScreen(){
       if (bodyTab === 'dashboard') requestAnimationFrame(renderBodyChart);
       return;
     }
-    // Início / Corrida → placeholder simples, sem sub-navegação de topo.
+    if (activeVertical === 'corrida') {
+      // Ecrã único (sem sub-navegação): formulário de registo + lista de
+      // corridas, tal como o Ginásio antes de ter separadores próprios.
+      nav.classList.add('hidden');
+      main.classList.remove('overflow-hidden', 'pb-28', 'flex', 'flex-col');
+      main.classList.add('overflow-y-auto', 'pb-28');
+      main.innerHTML = renderCorrida();
+      if (window.lucide) lucide.createIcons();
+      return;
+    }
+    // Início → placeholder simples, sem sub-navegação de topo (outras
+    // verticais ainda por construir caem aqui também).
     nav.classList.add('hidden');
     main.classList.remove('overflow-hidden', 'pb-28', 'flex', 'flex-col');
     main.classList.add('overflow-y-auto', 'pb-28');
@@ -1777,13 +1878,26 @@ function renderScreen(){
   if (activeTab === 'dashboard') requestAnimationFrame(renderDashChart);
 }
 
-// Cartão de módulo no Início: superfície neutra (igual ao resto da app) com um
-// selo de cor + barra lateral que identificam o módulo sem competir com o
-// cartão "Hoje" (o único elemento de cor forte, seguindo a regra 60/30/10).
+// Fundo/relevo partilhado por todos os cartões de estatística do Início: um
+// brilho radial subtil na cor do módulo por cima do gradiente "profundo" já
+// usado em .card, mais uma borda e sombra tingidas da mesma cor — dá a cada
+// módulo uma identidade cromática própria em vez da superfície neutra única
+// que havia antes. A textura de grão global (body::before) já cobre o resto.
+function statCardBg(color){
+  return `background:
+      radial-gradient(130% 150% at 100% 0%, color-mix(in srgb, ${color} 22%, transparent) 0%, transparent 60%),
+      linear-gradient(165deg, var(--surf-800), var(--surf-950));
+    border:1px solid color-mix(in srgb, ${color} 28%, var(--brd-700));
+    box-shadow: 0 6px 16px -6px rgba(0,0,0,0.55), inset 0 1px 0 rgba(255,255,255,0.05);`;
+}
+
+// Cartão de módulo no Início: selo de cor + barra lateral que identificam o
+// módulo, sobre o mesmo fundo com relevo/textura dos restantes cartões.
 function moduleCard({ onclick, icon, color, g1, g2, title, sub, soon }){
   return `
     <button ${onclick ? `onclick="${onclick}"` : ''}
-      class="relative bg-neutral-900 border border-neutral-800 rounded-2xl p-3.5 text-left flex items-center gap-3 transition ${onclick ? 'active:scale-[0.98]' : 'cursor-default'} ${soon ? 'opacity-60' : ''}">
+      class="relative rounded-2xl p-3.5 text-left flex items-center gap-3 transition ${onclick ? 'active:scale-[0.98]' : 'cursor-default'} ${soon ? 'opacity-60' : ''}"
+      style="${statCardBg(color)}">
       <span class="absolute left-0 top-3 bottom-3 w-[3px] rounded-full" style="background:${color}"></span>
       <span class="w-10 h-10 rounded-xl flex items-center justify-center shrink-0" style="background:linear-gradient(135deg,${g1},${g2})">
         <i data-lucide="${icon}" class="w-5 h-5 text-white"></i>
@@ -1796,43 +1910,533 @@ function moduleCard({ onclick, icon, color, g1, g2, title, sub, soon }){
 }
 
 /* ============================= INÍCIO (visão geral das verticais) ============================= */
+// Anel de progresso em SVG puro (sem lib de gráficos) — usado no cartão de
+// calorias e nos mini-cartões do Corpo. Começa às 12h e avança no sentido dos
+// ponteiros do relógio (rotação -90° no <svg>); o texto sobreposto não roda.
+function ringSvg(pct, { size = 96, stroke = 8, color = 'var(--accent)', trackColor = 'rgba(255,255,255,0.09)' } = {}){
+  const r = (size - stroke) / 2;
+  const c = size / 2;
+  const circumference = 2 * Math.PI * r;
+  const dash = circumference * Math.max(0, Math.min(100, pct)) / 100;
+  return `
+    <svg width="${size}" height="${size}" viewBox="0 0 ${size} ${size}" class="-rotate-90">
+      <circle cx="${c}" cy="${c}" r="${r}" fill="none" stroke="${trackColor}" stroke-width="${stroke}" />
+      ${dash > 0.5 ? `<circle cx="${c}" cy="${c}" r="${r}" fill="none" stroke="${color}" stroke-width="${stroke}" stroke-linecap="round"
+        stroke-dasharray="${dash} ${circumference}" style="transition: stroke-dasharray .4s ease" />` : ''}
+    </svg>`;
+}
+
+// Cartão principal do Início: substitui o antigo resumo "Hoje" — mesmo papel
+// (leva a Nutrição), mas agora com o anel de progresso e um sinal de estado
+// (macro no alvo / acima da meta) em vez de só um número.
+function nutritionHeroCard(totals, profile){
+  const calGoal = Number(profile.calorie_goal) || 0;
+  const proteinGoal = Number(profile.protein_goal) || 0;
+  const remaining = calGoal - totals.calories;
+  const pct = calGoal > 0 ? (totals.calories / calGoal) * 100 : 0;
+  const mealsToday = state.meals.filter(m => m.date === todayISO()).length;
+
+  let status = null;
+  if (calGoal > 0 && totals.calories > calGoal) {
+    status = { color: '#f87171', label: 'Calorias acima da meta' };
+  } else if (proteinGoal > 0 && totals.protein >= proteinGoal) {
+    status = { color: '#34d399', label: 'Proteína no alvo' };
+  } else if (proteinGoal > 0) {
+    status = { color: '#fbbf24', label: `Faltam ${(proteinGoal - totals.protein).toFixed(0)}g de proteína` };
+  }
+
+  const mealsLabel = `${mealsToday} refeiç${mealsToday === 1 ? 'ão' : 'ões'} registada${mealsToday === 1 ? '' : 's'} hoje`;
+  const desc = calGoal > 0
+    ? `${mealsLabel}. Estás a ${Math.round(Math.min(100, pct))}% da meta diária.`
+    : `${mealsLabel}. Define a tua meta no Perfil.`;
+
+  return `
+    <button onclick="switchVertical('nutricao')"
+      class="w-full text-left rounded-3xl p-5 active:scale-[0.99] transition" style="${statCardBg('var(--accent)')}">
+      <p class="text-[11px] font-semibold text-slate-500 uppercase tracking-wider mb-4">Hoje · Nutrição</p>
+      <div class="flex items-center gap-5">
+        <div class="relative shrink-0" style="width:104px;height:104px;">
+          ${ringSvg(pct, { size: 104, stroke: 9 })}
+          <div class="absolute inset-0 flex flex-col items-center justify-center">
+            <span class="text-2xl font-extrabold text-white leading-none">${totals.calories.toFixed(0)}</span>
+            <span class="text-[9px] font-semibold text-slate-500 uppercase tracking-wide mt-1">${calGoal > 0 ? `de ${calGoal.toFixed(0)} kcal` : 'kcal'}</span>
+          </div>
+        </div>
+        <div class="min-w-0 flex-1">
+          <p class="text-lg font-bold text-white leading-tight">${calGoal > 0
+            ? (remaining >= 0 ? `Restam ${remaining.toFixed(0)} kcal` : `${Math.abs(remaining).toFixed(0)} kcal acima`)
+            : 'Sem meta definida'}</p>
+          <p class="text-xs text-slate-400 mt-1.5 leading-relaxed">${desc}</p>
+          ${status ? `
+            <p class="flex items-center gap-1.5 mt-2.5 text-xs font-semibold" style="color:${status.color}">
+              <span class="w-1.5 h-1.5 rounded-full shrink-0" style="background:${status.color}"></span> ${status.label}
+            </p>` : ''}
+        </div>
+      </div>
+    </button>`;
+}
+
+// Mini-cartão do Corpo (peso / gordura corporal), no mesmo estilo de anel do
+// cartão de calorias, mas em par lado-a-lado. O anel mede "proximidade ao
+// objetivo" (100% = em cima do objetivo); sem objetivo definido, mostra só o
+// valor e a variação desde a última pesagem, sem anel preenchido.
+function bodyMiniRingCard(m, latestVal, prevVal, goal){
+  const hasVal = latestVal !== null && latestVal !== undefined;
+  const hasGoal = hasVal && goal !== null && goal !== undefined && isFinite(goal) && goal > 0;
+  const pct = hasGoal ? Math.max(0, Math.min(100, 100 - Math.abs(latestVal - goal) / goal * 100)) : 0;
+
+  const hasDelta = hasVal && prevVal !== null && prevVal !== undefined;
+  const delta = hasDelta ? (latestVal - prevVal) : null;
+  const improving = hasDelta && m.good !== null ? (m.good === 'up' ? delta > 0 : delta < 0) : null;
+  const deltaColor = improving === null ? 'text-slate-500' : improving ? 'text-emerald-400' : 'text-red-400';
+  const deltaArrow = delta === null ? '' : (delta > 0 ? '▲' : delta < 0 ? '▼' : '•');
+
+  return `
+    <button onclick="switchVertical('corpo')" class="text-left rounded-2xl p-3.5 active:scale-[0.98] transition" style="${statCardBg(m.color)}">
+      <p class="text-[10px] font-semibold text-slate-500 uppercase tracking-wide mb-2 truncate">${m.label}</p>
+      <div class="flex items-center gap-3">
+        <div class="relative shrink-0" style="width:52px;height:52px;">
+          ${ringSvg(hasGoal ? pct : 0, { size: 52, stroke: 5, color: m.color })}
+        </div>
+        <div class="min-w-0">
+          <p class="text-base font-extrabold text-white leading-none">${hasVal ? fmtMetric(m, latestVal) : '—'}</p>
+          <p class="text-[10px] text-slate-500 mt-1 truncate">${hasGoal ? `meta ${fmtMetric(m, goal)}` : 'Sem objetivo'}</p>
+          ${delta !== null ? `<p class="text-[10px] font-semibold ${deltaColor} mt-0.5">${deltaArrow} ${Math.abs(delta).toFixed(m.dec)}${m.unit}</p>` : ''}
+        </div>
+      </div>
+    </button>`;
+}
+
+// Cartão do Ginásio: nº de sessões concluídas esta semana (0 para quem não
+// tem a beta ativa — o módulo continua bloqueado, mas o cartão fica visível
+// a todos por indicação explícita).
+// Cartão do Ginásio (Sessões): tira de 7 dias (estilo "streak" de calendário)
+// em vez de anel — a mesma informação (treinou ou não em cada dia) lê-se
+// muito mais depressa numa tira do que num anel percentual, e dá variedade
+// visual à grelha (nem tudo tem de ser um anel).
+function gymSessionsCard(){
+  if (!isGymEnabled()) {
+    return moduleCard({ onclick: '', icon: 'dumbbell', color: '#6366f1', g1: '#1e3a8a', g2: '#6366f1',
+      title: 'Ginásio', sub: 'Em breve', soon: true });
+  }
+  const sessions = gymSessionsInRange('semana');
+  const trainedDates = new Set(sessions.map(s => s.date));
+  const monday = new Date(); monday.setDate(monday.getDate() - ((monday.getDay() + 6) % 7));
+  const days = Array.from({ length: 7 }, (_, i) => { const d = new Date(monday); d.setDate(d.getDate() + i); return d.toISOString().slice(0, 10); });
+  const labels = ['S', 'T', 'Q', 'Q', 'S', 'S', 'D'];
+  const todayStr = todayISO();
+
+  return `
+    <button onclick="switchVertical('ginasio')" class="w-full text-left rounded-2xl p-3.5 active:scale-[0.98] transition" style="${statCardBg('#6366f1')}">
+      <div class="flex items-center justify-between mb-3">
+        <p class="text-[10px] font-semibold text-slate-500 uppercase tracking-wide">Ginásio · Esta semana</p>
+        <p class="text-xs font-bold text-white">${sessions.length} ${sessions.length === 1 ? 'sessão' : 'sessões'}</p>
+      </div>
+      <div class="flex items-center gap-1.5">
+        ${days.map((d, i) => {
+          const trained = trainedDates.has(d);
+          const isToday = d === todayStr;
+          return `
+            <div class="flex flex-col items-center gap-1 flex-1">
+              <div class="w-full aspect-square rounded-lg flex items-center justify-center"
+                style="${trained ? 'background:linear-gradient(135deg,#1e3a8a,#6366f1)' : 'background:rgba(255,255,255,0.05)' + (isToday ? ';box-shadow:inset 0 0 0 1.5px #6366f1' : '')}">
+                ${trained ? '<i data-lucide="check" class="w-3.5 h-3.5 text-white"></i>' : ''}
+              </div>
+              <span class="text-[9px] ${isToday ? 'text-white font-bold' : 'text-slate-600'}">${labels[i]}</span>
+            </div>`;
+        }).join('')}
+      </div>
+    </button>`;
+}
+
+// Cartão opcional: volume total (kg) levantado esta semana, com duas
+// barrinhas a comparar com a semana anterior — outra variação de estilo
+// (barras em vez de anel/tira).
+function gymVolumeLastNDays(n, offsetDays){
+  const end = new Date(); end.setDate(end.getDate() - offsetDays);
+  const start = new Date(end); start.setDate(start.getDate() - n + 1);
+  const startISO = start.toISOString().slice(0, 10);
+  const endISO = end.toISOString().slice(0, 10);
+  return gymSessions.filter(s => s.date >= startISO && s.date <= endISO).reduce((sum, s) => sum + sessionVolume(s), 0);
+}
+function gymVolumeMiniCard(){
+  if (!isGymEnabled()) {
+    return moduleCard({ onclick: '', icon: 'weight', color: '#6366f1', g1: '#1e3a8a', g2: '#6366f1',
+      title: 'Ginásio', sub: 'Em breve', soon: true });
+  }
+  const thisWeek = gymVolumeLastNDays(7, 0);
+  const lastWeek = gymVolumeLastNDays(7, 7);
+  const max = Math.max(thisWeek, lastWeek, 1);
+  const bar = (value, color) => `
+    <div class="flex-1 h-1.5 rounded-full overflow-hidden" style="background:rgba(255,255,255,0.08)">
+      <div class="h-full rounded-full" style="width:${Math.max(4, value / max * 100)}%;background:${color}"></div>
+    </div>`;
+  return `
+    <button onclick="switchVertical('ginasio')" class="text-left rounded-2xl p-3.5 active:scale-[0.98] transition" style="${statCardBg('#6366f1')}">
+      <p class="text-[10px] font-semibold text-slate-500 uppercase tracking-wide mb-2">Ginásio · Volume</p>
+      <p class="text-2xl font-extrabold text-white leading-none">${Math.round(thisWeek)}<span class="text-xs font-semibold text-slate-500"> kg</span></p>
+      <div class="space-y-1 mt-2.5">
+        <div class="flex items-center gap-2"><span class="text-[9px] text-slate-500 w-9 shrink-0">Esta</span>${bar(thisWeek, '#6366f1')}</div>
+        <div class="flex items-center gap-2"><span class="text-[9px] text-slate-500 w-9 shrink-0">Ant.</span>${bar(lastWeek, '#3f3f70')}</div>
+      </div>
+    </button>`;
+}
+
+// Cartão opcional: macro específico de hoje (Proteína/Hidratos/Gordura),
+// mesmo estilo de anel dos mini-cartões do Corpo — anel mede % da meta.
+function nutrientMiniCard(nutrientKey, label, color, totals, profile){
+  const goal = Number(profile[nutrientKey + '_goal']) || 0;
+  const value = totals[nutrientKey] || 0;
+  const hasGoal = goal > 0;
+  const pct = hasGoal ? (value / goal) * 100 : 0;
+  return `
+    <button onclick="switchVertical('nutricao')" class="text-left rounded-2xl p-3.5 active:scale-[0.98] transition" style="${statCardBg(color)}">
+      <p class="text-[10px] font-semibold text-slate-500 uppercase tracking-wide mb-2 truncate">${label}</p>
+      <div class="flex items-center gap-3">
+        <div class="relative shrink-0" style="width:52px;height:52px;">
+          ${ringSvg(hasGoal ? pct : 0, { size: 52, stroke: 5, color })}
+        </div>
+        <div class="min-w-0">
+          <p class="text-base font-extrabold text-white leading-none">${value.toFixed(0)}<span class="text-xs font-semibold text-slate-500">g</span></p>
+          <p class="text-[10px] text-slate-500 mt-1 truncate">${hasGoal ? `meta ${goal.toFixed(0)}g` : 'Sem meta'}</p>
+        </div>
+      </div>
+    </button>`;
+}
+
+// Cartões da Corrida: distância (semana/mês) e pace médio "aos 5km"/"aos
+// 10km" — buckets por distância aproximada, como um corredor pensaria nisso
+// (comparar o pace de uma corrida de 5km com uma de 15km não faria sentido).
+// Ambos mostram uma seta de tendência: mais km = melhoria; pace mais baixo
+// (mais rápido) = melhoria.
+function lastNDaysKm(n, offsetDays){
+  const end = new Date(); end.setDate(end.getDate() - offsetDays);
+  const start = new Date(end); start.setDate(start.getDate() - n + 1);
+  const startISO = start.toISOString().slice(0, 10);
+  const endISO = end.toISOString().slice(0, 10);
+  return totalKm(runs.filter(r => r.date >= startISO && r.date <= endISO));
+}
+function formatPaceDelta(deltaSec){
+  const abs = Math.abs(deltaSec);
+  const m = Math.floor(abs / 60);
+  const s = Math.round(abs % 60);
+  return `${m}:${String(s).padStart(2, '0')}`;
+}
+// Sparkline de barras (km por dia, últimos 7 dias) por baixo do número — dá
+// mais informação de relance (quando correste) e é mais uma variação de
+// estilo visual (barras, em vez de anel).
+function kmHomeCard(){
+  const weekKm = totalKm(runsInRange('semana'));
+  const monthKm = totalKm(runsInRange('mes'));
+  const trend = lastNDaysKm(7, 0) - lastNDaysKm(7, 7);
+  const trendColor = trend > 0 ? 'text-emerald-400' : trend < 0 ? 'text-red-400' : 'text-slate-500';
+  const trendArrow = trend > 0 ? '▲' : trend < 0 ? '▼' : '•';
+
+  const days = Array.from({ length: 7 }, (_, i) => { const d = new Date(); d.setDate(d.getDate() - (6 - i)); return d.toISOString().slice(0, 10); });
+  const perDay = days.map(d => totalKm(runs.filter(r => r.date === d)));
+  const maxDay = Math.max(...perDay, 0.1);
+
+  return `
+    <button onclick="switchVertical('corrida')" class="w-full text-left rounded-2xl p-3.5 active:scale-[0.98] transition" style="${statCardBg('#f97316')}">
+      <div class="flex items-center justify-between mb-1">
+        <p class="text-[10px] font-semibold text-slate-500 uppercase tracking-wide">Corrida · Distância</p>
+        ${runs.length ? `<span class="text-[10px] font-semibold ${trendColor}">${trendArrow} ${Math.abs(trend).toFixed(1)} km</span>` : ''}
+      </div>
+      <p class="text-2xl font-extrabold text-white leading-none">${weekKm.toFixed(1)}<span class="text-xs font-semibold text-slate-500"> km</span></p>
+      <p class="text-[10px] text-slate-500 mt-1 mb-3">esta semana · ${monthKm.toFixed(1)} km este mês</p>
+      <div class="flex items-end gap-1.5" style="height:28px;">
+        ${perDay.map(km => `<div class="flex-1 rounded-sm" style="height:${km > 0 ? Math.max(4, km / maxDay * 28) : 3}px;background:${km > 0 ? '#f97316' : 'rgba(255,255,255,0.08)'}"></div>`).join('')}
+      </div>
+    </button>`;
+}
+function paceHomeCard(){
+  const b5 = bucketPaceTrend(5, 0.75);
+  const b10 = bucketPaceTrend(10, 1.5);
+  const line = (label, b) => {
+    if (!b) return `<div class="flex items-center justify-between mt-1.5"><span class="text-[11px] text-slate-500">${label}</span><span class="text-[11px] text-slate-600">Sem dados</span></div>`;
+    const improving = b.trend === null ? null : b.trend < 0;
+    const color = improving === null ? 'text-slate-500' : improving ? 'text-emerald-400' : 'text-red-400';
+    const arrow = b.trend === null ? '' : (improving ? '▲' : '▼');
+    return `<div class="flex items-center justify-between mt-1.5">
+      <span class="text-[11px] text-slate-500">${label}</span>
+      <span class="text-sm font-bold text-white">${formatPace(b.pace)}${b.trend !== null ? ` <span class="text-[10px] font-semibold ${color}">${arrow}${formatPaceDelta(b.trend)}</span>` : ''}</span>
+    </div>`;
+  };
+  return `
+    <button onclick="switchVertical('corrida')" class="text-left rounded-2xl p-3.5 active:scale-[0.98] transition" style="${statCardBg('#f97316')}">
+      <p class="text-[10px] font-semibold text-slate-500 uppercase tracking-wide mb-1">Corrida · Pace médio</p>
+      ${line('5 km', b5)}
+      ${line('10 km', b10)}
+    </button>`;
+}
+
+// Disposição ativa: array ordenado de chaves de HOME_CARD_DEFS guardado no
+// perfil. Chaves desconhecidas (ex.: de uma versão futura/antiga) são
+// ignoradas em vez de rebentar o render.
+function currentHomeLayout(){
+  const saved = state.profile && Array.isArray(state.profile.home_layout) ? state.profile.home_layout : null;
+  const layout = (saved && saved.length) ? saved : DEFAULT_HOME_LAYOUT;
+  const validKeys = new Set(HOME_CARD_DEFS.map(d => d.key));
+  return layout.filter(k => validKeys.has(k));
+}
+
+async function saveHomeLayout(next){
+  if (!state.profile) return;
+  const prevLayout = state.profile.home_layout;
+  state.profile.home_layout = next;
+  render();
+  try {
+    const { error } = await sb.from('profiles').update({ home_layout: next }).eq('id', currentUser.id);
+    if (error) throw error;
+  } catch(e) {
+    state.profile.home_layout = prevLayout;
+    flashSyncError(e);
+    render();
+  }
+}
+function toggleHomeCard(key){
+  const layout = currentHomeLayout().slice();
+  const idx = layout.indexOf(key);
+  if (idx === -1) layout.push(key); else layout.splice(idx, 1);
+  saveHomeLayout(layout);
+}
+function moveHomeCard(key, dir){
+  const layout = currentHomeLayout().slice();
+  const idx = layout.indexOf(key);
+  const newIdx = idx + dir;
+  if (idx === -1 || newIdx < 0 || newIdx >= layout.length) return;
+  [layout[idx], layout[newIdx]] = [layout[newIdx], layout[idx]];
+  saveHomeLayout(layout);
+}
+function toggleHomeEditMode(){
+  homeEditMode = !homeEditMode;
+  render();
+}
+
+// Mapa key → HTML já renderizado para cada cartão opcional (calculado uma
+// vez por render a partir dos dados atuais, e depois filtrado/ordenado pela
+// disposição escolhida pelo utilizador).
+function buildHomeCardsMap(totals, profile){
+  const latest = bodyAssessments[0] || null;
+  const prev = bodyAssessments[1] || null;
+  const bodyCard = key => {
+    const m = BODY_METRICS.find(x => x.key === key);
+    return bodyMiniRingCard(m, latest ? latest[key] : null, prev ? prev[key] : null, bodyGoal(m));
+  };
+  return {
+    weight_kg: bodyCard('weight_kg'),
+    body_fat_pct: bodyCard('body_fat_pct'),
+    bmi: bodyCard('bmi'),
+    muscle_mass_kg: bodyCard('muscle_mass_kg'),
+    body_water_pct: bodyCard('body_water_pct'),
+    protein_today: nutrientMiniCard('protein', 'Proteína hoje', '#a78bfa', totals, profile),
+    carbs_today: nutrientMiniCard('carbs', 'Hidratos hoje', '#38bdf8', totals, profile),
+    fat_today: nutrientMiniCard('fat', 'Gordura hoje', '#fb923c', totals, profile),
+    gym_sessions: gymSessionsCard(),
+    gym_volume: gymVolumeMiniCard(),
+    corrida_km: kmHomeCard(),
+    corrida_pace: paceHomeCard(),
+  };
+}
+
+// Painel de "Personalizar Início": lista os 12 cartões opcionais (ativos
+// primeiro, na ordem escolhida), com um interruptor para ativar/desativar e
+// setas para reordenar — sem arrastar, para funcionar de forma fiável em
+// qualquer ecrã tátil.
+function homeCardRow(d, active, idx, lastIdx){
+  return `
+    <div class="flex items-center gap-2 bg-neutral-900/60 border border-neutral-800 rounded-xl px-2.5 py-2">
+      <i data-lucide="${d.icon}" class="w-4 h-4 text-slate-400 shrink-0"></i>
+      <span class="text-xs text-white flex-1 truncate">${d.label}</span>
+      ${active ? `
+        <button onclick="moveHomeCard('${d.key}',-1)" ${idx === 0 ? 'disabled' : ''} type="button" class="text-slate-500 disabled:opacity-25 p-1">
+          <i data-lucide="chevron-up" class="w-3.5 h-3.5"></i>
+        </button>
+        <button onclick="moveHomeCard('${d.key}',1)" ${idx === lastIdx ? 'disabled' : ''} type="button" class="text-slate-500 disabled:opacity-25 p-1">
+          <i data-lucide="chevron-down" class="w-3.5 h-3.5"></i>
+        </button>
+      ` : ''}
+      <button onclick="toggleHomeCard('${d.key}')" type="button"
+        class="w-9 h-5 rounded-full relative transition shrink-0 ${active ? 'bg-[var(--accent)]' : 'bg-neutral-700'}">
+        <span class="absolute top-0.5 ${active ? 'left-4' : 'left-0.5'} w-4 h-4 rounded-full bg-white transition-all"></span>
+      </button>
+    </div>`;
+}
+// Ativos: pela ordem escolhida pelo utilizador (é a posição real no Início,
+// não faz sentido agrupar por módulo aqui). Inativos: agrupados por módulo
+// (Nutrição/Corpo/Ginásio/Corrida) com um cabeçalho, para serem fáceis de
+// encontrar quando a lista cresce.
+function renderHomeEditPanel(){
+  const layout = currentHomeLayout();
+  const activeSet = new Set(layout);
+  const activeDefs = layout.map(k => HOME_CARD_DEFS.find(d => d.key === k)).filter(Boolean);
+  const inactiveDefs = HOME_CARD_DEFS.filter(d => !activeSet.has(d.key));
+  const modules = [...new Set(inactiveDefs.map(d => d.module))];
+
+  return `
+    <div class="rounded-2xl p-4" style="${statCardBg('var(--accent)')}">
+      <div class="flex items-center justify-between mb-1">
+        <h2 class="text-sm font-bold text-white">Personalizar Início</h2>
+        <button onclick="toggleHomeEditMode()" class="text-xs font-semibold text-[var(--accent)]">Concluir</button>
+      </div>
+      <p class="text-[11px] text-slate-500 mb-3 leading-relaxed">Ativa os cartões que queres ver e usa as setas para escolher a ordem. O cartão de calorias é sempre o primeiro e não se pode desativar.</p>
+
+      ${activeDefs.length ? `
+        <p class="text-[10px] font-semibold text-slate-500 uppercase tracking-wide mb-1.5">Ativos, por esta ordem</p>
+        <div class="space-y-1.5 mb-3">
+          ${activeDefs.map(d => homeCardRow(d, true, layout.indexOf(d.key), layout.length - 1)).join('')}
+        </div>` : ''}
+
+      ${modules.map(mod => `
+        <p class="text-[10px] font-semibold text-slate-500 uppercase tracking-wide mb-1.5">${mod}</p>
+        <div class="space-y-1.5 mb-3">
+          ${inactiveDefs.filter(d => d.module === mod).map(d => homeCardRow(d, false, -1, -1)).join('')}
+        </div>`).join('')}
+    </div>`;
+}
+
 function renderHome(){
   const totals = rangeTotals('hoje');
   const profile = state.profile || {};
-  const calGoal = Number(profile.calorie_goal) || 0;
-  const remaining = calGoal - totals.calories;
-  const mealsToday = state.meals.filter(m => m.date === todayISO()).length;
+  const cardsMap = buildHomeCardsMap(totals, profile);
+  const layout = currentHomeLayout();
 
   return `
     <div class="space-y-4 fade-in">
-      <div class="tile-dark rounded-3xl p-5 relative overflow-hidden" style="background:
-          radial-gradient(120% 140% at 15% 0%, color-mix(in srgb, var(--accent) 60%, transparent) 0%, transparent 65%),
-          linear-gradient(135deg, color-mix(in srgb, var(--accent-dark) 70%, var(--tile-base-1)) 0%, color-mix(in srgb, var(--accent) 48%, var(--tile-base-3)) 100%);
-          border:1px solid var(--brd-700);">
-        <div class="relative z-10">
-          <p class="text-xs font-semibold text-white/70 uppercase tracking-wide mb-1">Hoje</p>
-          <p class="text-3xl font-bold text-white leading-none">${totals.calories.toFixed(0)}<span class="text-base font-semibold"> kcal</span></p>
-          <p class="text-xs text-white/80 mt-2">${calGoal > 0
-            ? (remaining >= 0 ? `Restam ${remaining.toFixed(0)} kcal de ${calGoal.toFixed(0)}` : `${Math.abs(remaining).toFixed(0)} kcal acima da meta`)
-            : 'Define as tuas metas no Perfil (dentro de Nutrição)'}</p>
-        </div>
-        <i data-lucide="flame" class="w-24 h-24 absolute -right-3 -bottom-3 text-white/15"></i>
+      <div class="flex items-center justify-between">
+        <p class="text-[11px] font-semibold text-slate-500 uppercase tracking-wide">Início</p>
+        <button onclick="toggleHomeEditMode()" type="button" class="flex items-center gap-1 text-[11px] font-semibold text-slate-400 border border-neutral-800 rounded-full px-2.5 py-1 active:scale-95 transition">
+          <i data-lucide="sliders-horizontal" class="w-3 h-3"></i> Personalizar
+        </button>
       </div>
 
-      <div class="grid grid-cols-2 gap-2.5">
-        ${moduleCard({ onclick:"switchVertical('nutricao')", icon:'utensils', color:'#10b981', g1:'#065f46', g2:'#10b981',
-          title:'Nutrição', sub:`${mealsToday} refeição(ões) hoje` })}
-        ${moduleCard({ onclick:"switchVertical('corpo')", icon:'scale', color:'#a855f7', g1:'#5b21b6', g2:'#a855f7',
-          title:'Corpo', sub: bodyAssessments.length ? `${bodyAssessments.length} avaliação(ões)` : 'Avaliação corporal' })}
-        ${moduleCard({ onclick: isGymEnabled() ? "switchVertical('ginasio')" : '', icon:'dumbbell', color:'#6366f1', g1:'#1e3a8a', g2:'#6366f1',
-          title:'Ginásio', sub: isGymEnabled() ? `${(gymRef.exercises||[]).length} exercícios` : 'Em breve', soon: !isGymEnabled() })}
-        ${moduleCard({ onclick:"switchVertical('corrida')", icon:'footprints', color:'#f97316', g1:'#9a3412', g2:'#f97316',
-          title:'Corrida', sub:'Em breve' })}
-        ${moduleCard({ onclick:"switchVertical('coach')", icon:'bot', color:'#06b6d4', g1:'#155e75', g2:'#06b6d4',
-          title:'Coach', sub:'Em breve' })}
+      ${nutritionHeroCard(totals, profile)}
+
+      ${homeEditMode ? renderHomeEditPanel() : `
+        ${layout.length ? `
+          <div class="grid grid-cols-2 gap-2.5" style="grid-auto-flow:dense;">
+            ${layout.map(k => {
+              const def = HOME_CARD_DEFS.find(d => d.key === k);
+              const span = def && def.size === 'full' ? 'col-span-2' : '';
+              // [&>*]: força o cartão (botão/div) lá dentro a preencher a
+              // célula da grelha — sem isto, um <button> (inline-block por
+              // omissão) encolhia para o conteúdo em vez de esticar como um
+              // item de grid normal fazia antes deste wrapper existir.
+              return `<div class="${span} [&>*]:w-full [&>*]:block">${cardsMap[k]}</div>`;
+            }).join('')}
+          </div>` : `
+          <button onclick="toggleHomeEditMode()" type="button" class="w-full text-xs text-slate-500 border-2 border-dashed border-neutral-800 rounded-2xl py-6">
+            Sem cartões ativos — toca em "Personalizar" para escolher.
+          </button>`}
+      `}
+    </div>
+  `;
+}
+
+/* ============================= CORRIDA (vertical) ============================= */
+function runCard(r){
+  const pace = paceSecPerKm(r);
+  return `
+    <div class="bg-neutral-900/60 border border-neutral-800 rounded-xl p-3 flex items-center justify-between gap-2">
+      <div class="min-w-0">
+        <p class="text-xs font-semibold text-white">${formatDatePT(r.date)}</p>
+        <p class="text-[11px] text-slate-500 mt-0.5">${Number(r.distance_km).toFixed(2)} km · ${formatDuration(r.duration_seconds)} · ${formatPace(pace)}</p>
+        ${r.notes ? `<p class="text-[10px] text-slate-600 mt-0.5 truncate">${esc(r.notes)}</p>` : ''}
+      </div>
+      <button onclick="deleteRun('${r.id}')" class="text-slate-600 hover:text-red-400 shrink-0">
+        <i data-lucide="trash-2" class="w-3.5 h-3.5"></i>
+      </button>
+    </div>`;
+}
+
+function renderCorrida(){
+  return `
+    <div class="space-y-4 fade-in">
+      <div class="rounded-2xl p-4" style="${statCardBg('#f97316')}">
+        <div class="flex items-center gap-2 mb-3">
+          <i data-lucide="footprints" class="w-4 h-4" style="color:#f97316"></i>
+          <h2 class="text-sm font-semibold text-white">Nova Corrida</h2>
+        </div>
+        <div class="grid grid-cols-2 gap-2 mb-2">
+          <input id="runDate" type="date" value="${runDate}" max="${todayISO()}" onchange="runDate=this.value"
+            class="w-full bg-neutral-900 border border-neutral-800 rounded-xl px-3 py-2 text-sm text-white outline-none focus:border-[var(--accent)]/60" />
+          <input id="runDistance" type="number" min="0" step="0.01" placeholder="Distância (km)" value="${esc(runDistanceDraft)}"
+            oninput="runDistanceDraft=this.value"
+            class="w-full bg-neutral-900 border border-neutral-800 rounded-xl px-3 py-2 text-sm text-white placeholder-slate-600 outline-none focus:border-[var(--accent)]/60" />
+        </div>
+        <input id="runDuration" type="number" min="0" step="0.1" placeholder="Duração (minutos)" value="${esc(runDurationDraft)}"
+          oninput="runDurationDraft=this.value"
+          class="w-full bg-neutral-900 border border-neutral-800 rounded-xl px-3 py-2 text-sm text-white placeholder-slate-600 outline-none focus:border-[var(--accent)]/60 mb-2" />
+        <input id="runNotes" type="text" maxlength="200" placeholder="Notas (opcional) — ex.: trail, ritmo forte" value="${esc(runNotesDraft)}"
+          oninput="runNotesDraft=this.value"
+          class="w-full bg-neutral-900 border border-neutral-800 rounded-xl px-3 py-2 text-xs text-white placeholder-slate-600 outline-none focus:border-[var(--accent)]/60 mb-2" />
+        ${runError ? `<p class="text-[11px] text-red-400 mb-2">${esc(runError)}</p>` : ''}
+        <button onclick="submitNewRun()" ${savingRun ? 'disabled' : ''} type="button"
+          class="w-full bg-[var(--accent)] text-neutral-950 font-bold text-sm rounded-xl py-2.5 flex items-center justify-center gap-1.5 disabled:opacity-50">
+          ${savingRun ? '<i data-lucide="loader-2" class="w-4 h-4 animate-spin"></i> A gravar...' : '<i data-lucide="check" class="w-4 h-4"></i> Registar Corrida'}
+        </button>
+      </div>
+
+      <div class="space-y-2">
+        ${runs.length === 0 ? `<p class="text-xs text-slate-500 px-1">Sem corridas registadas.</p>` : runs.map(runCard).join('')}
       </div>
     </div>
   `;
+}
+
+async function submitNewRun(){
+  if (savingRun) return;
+  const dateEl = document.getElementById('runDate');
+  const date = dateEl ? dateEl.value : runDate;
+  const distance = Number(runDistanceDraft);
+  const minutes = Number(runDurationDraft);
+
+  if (!date || !(distance > 0) || !(minutes > 0)) {
+    runError = 'Preenche a data, a distância e a duração com valores válidos.';
+    render();
+    return;
+  }
+  runError = null;
+  savingRun = true;
+  render();
+
+  const durationSeconds = Math.round(minutes * 60);
+  const notes = runNotesDraft.trim() || null;
+  try {
+    const { data, error } = await sb.from('runs').insert({
+      user_id: currentUser.id, date, distance_km: distance, duration_seconds: durationSeconds, notes,
+    }).select().single();
+    if (error) throw error;
+    runs.unshift(data);
+    runs.sort((a, b) => b.date.localeCompare(a.date) || (b.created_at || '').localeCompare(a.created_at || ''));
+    runDate = todayISO();
+    runDistanceDraft = '';
+    runDurationDraft = '';
+    runNotesDraft = '';
+  } catch (e) {
+    runError = e.message || 'Falha a gravar a corrida.';
+  }
+  savingRun = false;
+  render();
+}
+
+async function deleteRun(id){
+  const idx = runs.findIndex(r => r.id === id);
+  if (idx === -1) return;
+  const [removed] = runs.splice(idx, 1);
+  render();
+  try {
+    const { error } = await sb.from('runs').delete().eq('id', id);
+    if (error) throw error;
+  } catch (e) {
+    runs.splice(idx, 0, removed);
+    flashSyncError(e);
+  }
+}
+
+function fabCreateRun(){
+  closeFab();
+  switchVertical('corrida');
 }
 
 function renderVerticalPlaceholder(v){
@@ -2423,7 +3027,7 @@ function renderBodyCalendario(){
                 class="aspect-square flex flex-col items-center justify-center rounded-xl text-xs transition
                   ${isSelected ? 'bg-[var(--accent)] text-neutral-950 font-bold' : isToday ? 'border border-[var(--accent)]/60 text-white' : 'text-slate-300 hover:bg-neutral-800'}">
                 ${dayNum}
-                <span class="w-1.5 h-1.5 rounded-full mt-0.5 ${isSelected ? 'bg-neutral-950' : dotColor}"></span>
+                <span class="w-1.5 h-1.5 rounded-full mt-0.5 ${dotColor}"></span>
               </button>
             `;
           }).join('')}
@@ -4056,7 +4660,7 @@ function renderCalendario(){
                 class="aspect-square flex flex-col items-center justify-center rounded-xl text-xs transition
                   ${isSelected ? 'bg-[var(--accent)] text-neutral-950 font-bold' : isToday ? 'border border-[var(--accent)]/60 text-white' : 'text-slate-300 hover:bg-neutral-800'}">
                 ${dayNum}
-                <span class="w-1.5 h-1.5 rounded-full mt-0.5 ${isSelected ? 'bg-neutral-950' : dotColor}"></span>
+                <span class="w-1.5 h-1.5 rounded-full mt-0.5 ${dotColor}"></span>
               </button>
             `;
           }).join('')}

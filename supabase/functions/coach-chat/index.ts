@@ -91,11 +91,13 @@ const RESPONSE_SCHEMA = {
   required: ["on_topic", "reply", "suggestions"],
 };
 
-// Estados HTTP que a própria Google trata como transitórios (sobrecarga,
-// rate-limit, indisponibilidade momentânea) — vale a pena repetir estes.
-// Erros "permanentes" (400, 401, 403...) passam sempre à primeira para o
-// chamador, porque repetir não muda o resultado.
-const GEMINI_RETRYABLE_STATUSES = new Set([429, 500, 502, 503, 504]);
+// Estados HTTP de sobrecarga momentânea do lado da Google (500/502/503/504) —
+// vale a pena repetir estes, porque costumam resolver-se à segunda. O 429
+// (limite de pedidos excedido) fica DE FORA de propósito: repetir logo a
+// seguir só volta a bater no mesmo limite por minuto — e até o acelera — por
+// isso passa já ao chamador com a mensagem própria de 429 (ver handler).
+// Erros "permanentes" (400, 401, 403...) também passam sempre à primeira.
+const GEMINI_RETRYABLE_STATUSES = new Set([500, 502, 503, 504]);
 
 // fetch com limite de tempo por tentativa + repetições automáticas quando a
 // chamada fica presa (AbortError), falha ao nível da rede, ou o Gemini

@@ -50,6 +50,14 @@ alter table profiles
   add column if not exists goal_metabolic_age numeric,
   add column if not exists goal_lean_body_mass_kg numeric;
 
+-- disposição personalizável dos cartões de estatística no Início (o cartão
+-- de calorias é sempre fixo/primeiro e não faz parte desta lista) — array
+-- ordenado de chaves de HOME_CARD_DEFS (ver index.html); chaves fora da
+-- lista ficam desativadas.
+alter table profiles
+  add column if not exists home_layout jsonb not null
+    default '["weight_kg","body_fat_pct","gym_sessions","corrida_km","corrida_pace"]'::jsonb;
+
 -- perfil criado automaticamente no signup
 create or replace function public.handle_new_user()
 returns trigger language plpgsql security definer set search_path = public as $$
@@ -382,6 +390,22 @@ alter table workout_session_sets enable row level security;
 create policy "own rows" on workout_session_sets for all
   using (auth.uid() = user_id) with check (auth.uid() = user_id);
 create policy "admin read all" on workout_session_sets for select using (public.is_admin());
+
+-- ============ runs: registo de corridas (distância + tempo) ============
+create table runs (
+  id uuid primary key default gen_random_uuid(),
+  user_id uuid not null references auth.users(id) on delete cascade,
+  date date not null,
+  distance_km numeric not null check (distance_km > 0),
+  duration_seconds integer not null check (duration_seconds > 0),
+  notes text,
+  created_at timestamptz not null default now()
+);
+create index runs_user_date_idx on runs(user_id, date desc);
+alter table runs enable row level security;
+create policy "own rows" on runs for all
+  using (auth.uid() = user_id) with check (auth.uid() = user_id);
+create policy "admin read all" on runs for select using (public.is_admin());
 
 -- ---- SEED da biblioteca (músculos → exercícios → envolvimento) ----
 insert into muscles (name, muscle_group, body_region, svg_key) values

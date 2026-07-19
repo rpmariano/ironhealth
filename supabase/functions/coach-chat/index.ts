@@ -553,6 +553,14 @@ async function handler(req: Request): Promise<Response> {
             generationConfig: {
               temperature: 0.7,
               maxOutputTokens: 1200,
+              // O gemini-flash-latest tem "thinking" ativado por omissão, e
+              // esses tokens contam para maxOutputTokens — em respostas
+              // curtas isso podia consumir o orçamento todo em raciocínio
+              // interno e cortar o JSON a meio (o utilizador via o JSON
+              // partido em vez da resposta). Desativado: não precisamos de
+              // raciocínio profundo para conselhos de coaching conversacional,
+              // e poupa tokens (cobrados como output) que nunca se viam.
+              thinkingConfig: { thinkingBudget: 0 },
               response_mime_type: "application/json",
               response_schema: RESPONSE_SCHEMA,
             },
@@ -646,8 +654,13 @@ async function handler(req: Request): Promise<Response> {
         ? parsed.suggestions.filter((s: unknown) => typeof s === "string" && s.trim()).slice(0, 3)
         : [];
     } catch {
-      // Se por algum motivo não vier JSON válido, usa o texto tal como veio.
-      replyText = rawText;
+      // JSON inválido/cortado (ex.: resposta truncada a meio) — nunca mostrar
+      // o texto bruto ao utilizador (parecia um JSON partido no ecrã); melhor
+      // pedir para tentar de novo do que guardar/mostrar lixo no histórico.
+      console.error("Gemini devolveu JSON inválido/incompleto:", rawText);
+      return jsonResponse({
+        error: "O coach teve um problema a gerar a resposta. Tenta novamente.",
+      }, 502);
     }
 
     // ── Guardar resposta do modelo ───────────────────────────────────────

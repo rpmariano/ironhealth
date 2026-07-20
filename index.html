@@ -609,7 +609,10 @@ const HOME_CARD_DEFS = [
 // Início — o utilizador escolhe QUAIS ativar, não a ordem. Curada para dar
 // prioridade à informação mais relevante de cada módulo num relance.
 const CANONICAL_HOME_ORDER = HOME_CARD_DEFS.map(d => d.key);
-const DEFAULT_HOME_LAYOUT = ['weight_kg', 'body_fat_pct', 'gym_sessions', 'gym_volume', 'corrida_km', 'corrida_pace'];
+// Por defeito cobre sempre os três pilares que o Coach monitoriza (Nutrição,
+// Corpo, Ginásio/Corrida) — a Próxima Prova é fixa e fica fora deste sistema
+// (ver renderHome, mesmo tratamento do cartão de calorias).
+const DEFAULT_HOME_LAYOUT = ['weight_kg', 'body_fat_pct', 'protein_today', 'gym_sessions', 'gym_volume', 'corrida_km', 'corrida_pace'];
 let homeEditMode = false;
 let coachLoading  = false;
 let coachSuggestions = []; // perguntas de seguimento sugeridas pela última resposta
@@ -653,6 +656,8 @@ let bodyNotes = '';            // observação livre antes da análise
 let analyzingBody = false;
 let expandedAssessmentId = null;
 let reanalyzingAssessmentId = null;
+let suggestingGoals = false;      // pedido ao Coach para definir objetivos de Corpo+Nutrição (Perfil)
+let goalsRationale = null;        // explicação do Coach para os últimos objetivos sugeridos
 let selectedBodyMetric = 'weight_kg'; // métrica mostrada no gráfico do dashboard
 let bodyChart = null;
 let bodyCalendarViewMonth = todayISO().slice(0,7); // 'YYYY-MM' do mês visível
@@ -1192,6 +1197,42 @@ async function saveProfileFromForm(){
   } catch(e) { flashSyncError(e); }
 }
 
+// Pede ao Coach para sugerir objetivos de Corpo (goal_*) e de Nutrição
+// (calorie_goal/protein_goal/carbs_goal/fat_goal) tendo em conta as próximas
+// provas agendadas e todo o histórico existente (avaliações, nutrição,
+// corridas, ginásio). A edge function grava diretamente em profiles — aqui
+// só sincronizamos o state.profile local com o que ela devolveu, para os
+// inputs pfGoal_*/pfCal/pfPro/pfCarb/pfFat refletirem os novos valores no
+// próximo render().
+async function suggestGoals(){
+  if (suggestingGoals) return;
+  suggestingGoals = true;
+  render();
+  try {
+    const { data, error } = await sb.functions.invoke('suggest-goals', { body: {} });
+    if (error) throw new Error(await edgeFunctionErrorMessage(error, 'Falha a sugerir objetivos.'));
+    if (data && data.error) throw new Error(data.error);
+
+    Object.assign(state.profile, data.goals || {});
+    goalsRationale = data.rationale || null;
+    const updatedCount = Object.keys(data.goals || {}).length;
+    showToast('success', 'Objetivos atualizados',
+      updatedCount ? `O Coach ajustou ${updatedCount} objetivo(s) de Corpo/Nutrição.` : 'O Coach não encontrou dados suficientes para sugerir objetivos novos.');
+    logEvent('success', 'goals_suggestion', null, { updated: updatedCount, ...(data.usage || {}) });
+  } catch(e) {
+    console.error(e);
+    const msg = e.message || 'Falha a sugerir objetivos. Tenta novamente.';
+    showToast('error', null, msg);
+    logEvent('error', 'goals_suggestion', msg);
+  }
+  suggestingGoals = false;
+  render();
+}
+function dismissGoalsRationale(){
+  goalsRationale = null;
+  render();
+}
+
 /* ============================= FOTO + ANÁLISE ============================= */
 // Comprime um ficheiro: máx 1280px no lado maior, JPEG q0.8
 function compressImage(file){
@@ -1718,7 +1759,7 @@ const GEMINI_COST_EVENT_MODULE = {
   body_analysis: 'Corpo', body_reanalysis: 'Corpo',
   gym_analysis: 'Ginásio', gym_reanalysis: 'Ginásio',
   run_analysis: 'Corrida', run_reanalysis: 'Corrida',
-  coach_message: 'Coach',
+  coach_message: 'Coach', goals_suggestion: 'Coach',
 };
 function geminiCost(inputTokens, outputTokens){
   return (inputTokens / 1e6) * GEMINI_PRICE_PER_M_INPUT + (outputTokens / 1e6) * GEMINI_PRICE_PER_M_OUTPUT;
@@ -2407,6 +2448,60 @@ function paceHomeCard(){
     </button>`;
 }
 
+// Vai diretamente para a Agenda de provas (não o Registo) — usado pelo
+// cartão "Próxima Prova" do Início, espelhando o padrão de goToAvaliarForDate.
+function goToCorridaAgenda(){
+  corridaTab = 'agenda';
+  switchVertical('corrida');
+}
+
+// Cartão "Próxima Prova": contagem decrescente para a prova agendada mais
+// próxima — é o indicador central que liga a Agenda (Fase 3) ao Início,
+// para o utilizador ver de imediato quanto tempo falta sem abrir a Corrida.
+function nextRaceHomeCard(){
+  const todayIso = todayISO();
+  const upcoming = raceEvents
+    .filter(e => e.status !== 'concluida' && e.date >= todayIso)
+    .sort((a,b) => a.date.localeCompare(b.date));
+  const next = upcoming[0];
+  const color = '#eab308';
+
+  if (!next) {
+    return `
+      <button onclick="goToCorridaAgenda()" class="w-full text-left rounded-2xl p-3.5 active:scale-[0.98] transition" style="${statCardBg(color)}">
+        <p class="text-[10px] font-semibold text-slate-500 uppercase tracking-wide mb-2">Próxima Prova</p>
+        <div class="flex items-center gap-2.5">
+          <span class="w-9 h-9 rounded-xl flex items-center justify-center shrink-0" style="background:${color}1a;">
+            <i data-lucide="flag" class="w-4 h-4" style="color:${color}"></i>
+          </span>
+          <p class="text-xs text-slate-500">Sem provas agendadas — toca para adicionar uma na Agenda.</p>
+        </div>
+      </button>`;
+  }
+
+  const daysUntil = Math.round((new Date(next.date + 'T00:00:00') - new Date(todayIso + 'T00:00:00')) / 86400000);
+  const typeLabel = (RACE_TYPES.find(t => t.key === next.race_type) || {}).label || next.race_type;
+  const countLabel = daysUntil === 0 ? 'Hoje!' : daysUntil === 1 ? '1 dia' : `${daysUntil} dias`;
+  const countColor = daysUntil === 0 ? '#ef4444' : daysUntil <= 7 ? '#f97316' : '#fff';
+
+  return `
+    <button onclick="goToCorridaAgenda()" class="w-full text-left rounded-2xl p-3.5 active:scale-[0.98] transition" style="${statCardBg(color)}">
+      <div class="flex items-center justify-between mb-1.5">
+        <p class="text-[10px] font-semibold text-slate-500 uppercase tracking-wide">Próxima Prova</p>
+        <span class="text-[9px] font-semibold px-1.5 py-0.5 rounded-full" style="background:${color}1a;color:${color}">${esc(typeLabel)}</span>
+      </div>
+      <div class="flex items-end justify-between gap-2">
+        <div class="min-w-0">
+          <p class="text-sm font-bold text-white truncate">${esc(next.name)}</p>
+          <p class="text-[10px] text-slate-500 mt-0.5 truncate">${formatDatePT(next.date)}${next.location ? ` · ${esc(next.location)}` : ''}</p>
+        </div>
+        <div class="text-right shrink-0">
+          <p class="text-xl font-extrabold leading-none" style="color:${countColor}">${countLabel}</p>
+        </div>
+      </div>
+    </button>`;
+}
+
 // Cartões ativos (o utilizador só escolhe QUAIS, não a ordem — ver
 // CANONICAL_HOME_ORDER) devolvidos sempre pela mesma ordem fixa, agrupada
 // por módulo. Chaves desconhecidas (ex.: de uma versão futura/antiga) são
@@ -2530,6 +2625,8 @@ function renderHome(){
           <i data-lucide="sliders-horizontal" class="w-3 h-3"></i> Personalizar
         </button>
       </div>
+
+      ${nextRaceHomeCard()}
 
       ${nutritionHeroCard(totals, profile)}
 
@@ -5312,6 +5409,33 @@ function renderPerfil(){
 
       <div class="card rounded-2xl p-4">
         <div class="flex items-center gap-2 mb-3">
+          <i data-lucide="sparkles" class="w-4 h-4 text-[var(--accent)]"></i>
+          <h2 class="text-sm font-semibold text-white">Objetivos com o Coach</h2>
+        </div>
+        <p class="text-[11px] text-slate-500 mb-3">O Coach analisa o teu histórico de Corpo, Nutrição, Ginásio e Corrida — e as tuas próximas provas agendadas — para sugerir objetivos de Corpo e de Nutrição abaixo.</p>
+        <button onclick="suggestGoals()" ${suggestingGoals ? 'disabled' : ''} type="button"
+          class="w-full border-2 border-dashed border-[var(--accent)]/40 hover:border-[var(--accent)]/70 hover:bg-[var(--accent)]/5 text-[var(--accent)] text-xs font-semibold rounded-xl py-2.5 flex items-center justify-center gap-1.5 transition disabled:opacity-50 ${suggestingGoals?'analyzing':''}">
+          ${suggestingGoals
+            ? '<i data-lucide="loader-2" class="w-4 h-4 animate-spin"></i> O Coach está a analisar o teu histórico...'
+            : '<i data-lucide="sparkles" class="w-4 h-4"></i> Pedir ao Coach para definir objetivos'}
+        </button>
+        ${goalsRationale ? `
+          <div class="rounded-xl bg-[var(--accent)]/5 border border-[var(--accent)]/20 p-3 mt-3">
+            <div class="flex items-center justify-between gap-2 mb-1">
+              <span class="text-[11px] font-semibold text-[var(--accent)] flex items-center gap-1.5">
+                <i data-lucide="sparkles" class="w-3.5 h-3.5"></i> Porquê estes objetivos
+              </span>
+              <button onclick="dismissGoalsRationale()" class="text-slate-500 hover:text-white shrink-0">
+                <i data-lucide="x" class="w-3.5 h-3.5"></i>
+              </button>
+            </div>
+            <p class="text-xs text-slate-300 leading-relaxed">${esc(goalsRationale)}</p>
+          </div>
+        ` : ''}
+      </div>
+
+      <div class="card rounded-2xl p-4">
+        <div class="flex items-center gap-2 mb-3">
           <i data-lucide="scale" class="w-4 h-4 text-[var(--accent)]"></i>
           <h2 class="text-sm font-semibold text-white">Avaliação Corporal</h2>
         </div>
@@ -5328,6 +5452,7 @@ function renderPerfil(){
           </div>
         </div>
         <p class="text-[11px] text-slate-500 mb-2">Objetivos (opcional) — usados para acompanhar o progresso no módulo Corpo.</p>
+
         <div class="grid grid-cols-2 gap-2">
           ${BODY_METRICS.map(m => `
             <div>

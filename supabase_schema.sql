@@ -412,6 +412,14 @@ create policy "own rows" on runs for all
   using (auth.uid() = user_id) with check (auth.uid() = user_id);
 create policy "admin read all" on runs for select using (public.is_admin());
 
+-- Splits opcionais (tempo em segundos até essa distância, dentro da mesma
+-- corrida) — usados no Início para o "melhor pace aos 5/10/21 km" refletir o
+-- troço real em vez do pace médio da corrida inteira. Nunca obrigatórios:
+-- sem split guardado, os cartões caem no pace médio como antes.
+alter table runs add column if not exists split_5k_seconds integer check (split_5k_seconds is null or split_5k_seconds > 0);
+alter table runs add column if not exists split_10k_seconds integer check (split_10k_seconds is null or split_10k_seconds > 0);
+alter table runs add column if not exists split_21k_seconds integer check (split_21k_seconds is null or split_21k_seconds > 0);
+
 -- ---- SEED da biblioteca (músculos → exercícios → envolvimento) ----
 insert into muscles (name, muscle_group, body_region, svg_key) values
   ('Peitoral maior',            'peito',         'frente',  'chest'),

@@ -19,11 +19,6 @@ const MAX_TOOL_ROUNDS = 4;  // idas-e-voltas de function calling antes de força
 const GEMINI_TIMEOUT_MS = 40000;
 const GEMINI_RETRIES = 1; // repetições automáticas após timeout, antes de desistir de vez
 
-// Ginásio em beta fechada — funcionalidades do Coach relacionadas com treino
-// (resumo + tool get_gym_history) só ficam ativas para esta conta enquanto a
-// vertical não é lançada a todos os utilizadores.
-const GYM_BETA_EMAIL = "rpmariano@gmail.com";
-
 const NUTRITION_TOOL = {
   name: "get_nutrition_history",
   description:
@@ -57,12 +52,26 @@ const GYM_TOOL = {
   },
 };
 
+const RUNNING_TOOL = {
+  name: "get_running_history",
+  description:
+    "Obtém as corridas do utilizador (data, tipo — simples/treino/competição —, distância, " +
+    "duração, pace) para um intervalo de datas específico. Usa esta função sempre que a " +
+    "pergunta envolva corridas fora dos últimos 30 dias já fornecidos no contexto.",
+  parameters: {
+    type: "OBJECT",
+    properties: {
+      start_date: { type: "STRING", description: "Data de início, formato YYYY-MM-DD" },
+      end_date: { type: "STRING", description: "Data de fim (inclusive), formato YYYY-MM-DD" },
+    },
+    required: ["start_date", "end_date"],
+  },
+};
+
 // Ferramentas que o Gemini pode invocar quando a pergunta do utilizador sai
-// das janelas já incluídas no contexto (ex: "compara Maio com hoje"). A tool
-// de ginásio só é oferecida às contas com a beta fechada ativa.
-function buildTools(gymEnabled: boolean) {
-  const functionDeclarations = gymEnabled ? [NUTRITION_TOOL, GYM_TOOL] : [NUTRITION_TOOL];
-  return [{ functionDeclarations }];
+// das janelas já incluídas no contexto (ex: "compara Maio com hoje").
+function buildTools() {
+  return [{ functionDeclarations: [NUTRITION_TOOL, GYM_TOOL, RUNNING_TOOL] }];
 }
 
 // Contagem de tokens de uma (ou mais, somadas) chamadas ao Gemini —
@@ -305,13 +314,111 @@ export async function runGetGymHistory(sb: any, userId: string, args: { start_da
   return `Treinos de ${start_date} a ${end_date} (${rows.length}):\n${lines.join("\n")}`;
 }
 
+// ── Corrida ──────────────────────────────────────────────────────────────
+const RUN_KIND_LABELS: Record<string, string> = {
+  simples: "Simples", treino: "Treino", competicao: "Competição",
+};
+const RUN_TRAINING_TYPE_LABELS: Record<string, string> = {
+  continuo: "Contínuo", longo: "Longo", tempo: "Tempo", recuperacao: "Recuperação",
+  intervalos: "Intervalos", sprints: "Sprints",
+};
+
+function formatPace(distanceKm: number | null, durationSeconds: number | null): string | null {
+  if (!distanceKm || !durationSeconds || distanceKm <= 0) return null;
+  const secPerKm = durationSeconds / distanceKm;
+  const m = Math.floor(secPerKm / 60);
+  const s = Math.round(secPerKm % 60);
+  return `${m}:${String(s).padStart(2, "0")}/km`;
+}
+function formatDuration(totalSeconds: number): string {
+  const h = Math.floor(totalSeconds / 3600);
+  const m = Math.floor((totalSeconds % 3600) / 60);
+  const s = Math.round(totalSeconds % 60);
+  return h > 0 ? `${h}:${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}` : `${m}:${String(s).padStart(2, "0")}`;
+}
+
+// deno-lint-ignore no-explicit-any
+function summariseRuns(runs: any[]): string[] {
+  return runs.map((r) => {
+    const kindLabel = r.kind === "treino"
+      ? `Treino${r.training_type ? ` (${RUN_TRAINING_TYPE_LABELS[r.training_type] || r.training_type})` : ""}`
+      : RUN_KIND_LABELS[r.kind] || "Simples";
+    const distance = r.distance_km != null ? `${Number(r.distance_km).toFixed(2)} km` : null;
+    const duration = r.duration_seconds != null ? formatDuration(r.duration_seconds) : null;
+    const pace = formatPace(r.distance_km, r.duration_seconds);
+    const parts = [distance, duration, pace].filter(Boolean);
+    return `- ${r.date}: ${kindLabel}${parts.length ? ` — ${parts.join(", ")}` : ""}`;
+  });
+}
+
+// deno-lint-ignore no-explicit-any
+function buildRunningSummary(runs: any[], windowDays: number): string {
+  if (runs.length === 0) {
+    return `Corridas (últimos ${windowDays} dias): sem corridas registadas.`;
+  }
+  return `Corridas (últimos ${windowDays} dias, ${runs.length} registada(s)):\n${summariseRuns(runs).join("\n")}`;
+}
+
+// Executa a function call get_running_history: corridas num intervalo.
+// deno-lint-ignore no-explicit-any
+export async function runGetRunningHistory(sb: any, userId: string, args: { start_date?: string; end_date?: string }): Promise<string> {
+  const { start_date, end_date } = args;
+  if (!start_date || !end_date || !ISO_DATE_RE.test(start_date) || !ISO_DATE_RE.test(end_date)) {
+    return "Erro: start_date e end_date têm de ser strings no formato YYYY-MM-DD.";
+  }
+  const start = new Date(start_date + "T00:00:00Z");
+  const end = new Date(end_date + "T00:00:00Z");
+  if (start > end) return "Erro: start_date é posterior a end_date.";
+  const rangeDays = Math.round((end.getTime() - start.getTime()) / 86400000) + 1;
+  if (rangeDays > MAX_RANGE_DAYS) return `Erro: intervalo demasiado longo (máximo ${MAX_RANGE_DAYS} dias).`;
+
+  const { data, error } = await sb
+    .from("runs")
+    .select("date, kind, training_type, distance_km, duration_seconds")
+    .eq("user_id", userId)
+    .gte("date", start_date)
+    .lte("date", end_date)
+    .order("date", { ascending: true });
+
+  if (error) return `Erro ao consultar dados: ${error.message}`;
+  if (!data || data.length === 0) return `Sem corridas registadas entre ${start_date} e ${end_date}.`;
+  return `Corridas de ${start_date} a ${end_date} (${data.length}):\n${summariseRuns(data).join("\n")}`;
+}
+
+// ── Agenda de provas ─────────────────────────────────────────────────────
+const RACE_TYPE_LABELS: Record<string, string> = {
+  estrada: "Estrada", trail: "Trail", ultra: "Ultra", "5k": "5 km", "10k": "10 km",
+  "21k": "Meia maratona", "42k": "Maratona", outro: "Outro",
+};
+
+// Contexto das próximas provas agendadas — é a base da proactividade do
+// Coach (ex.: sugerir tapering/hidratos quando falta pouco para uma prova).
+// Inclui explicitamente "dias até à prova" para o modelo não ter de calcular
+// datas por conta própria.
+// deno-lint-ignore no-explicit-any
+function buildRaceEventsContext(events: any[], todayISO: string): string | null {
+  if (events.length === 0) return null;
+  const today = new Date(todayISO + "T00:00:00Z");
+  const lines = events.map((e) => {
+    const eventDate = new Date(e.date + "T00:00:00Z");
+    const daysUntil = Math.round((eventDate.getTime() - today.getTime()) / 86400000);
+    const typeLabel = RACE_TYPE_LABELS[e.race_type] || e.race_type;
+    const extras = [
+      e.location ? `local: ${e.location}` : null,
+      e.target_time ? `tempo-alvo: ${e.target_time}` : null,
+    ].filter(Boolean).join(", ");
+    return `- ${e.date} (daqui a ${daysUntil} dia(s)): ${e.name} — ${typeLabel}${extras ? ` (${extras})` : ""}`;
+  });
+  return `Próximas provas agendadas:\n${lines.join("\n")}`;
+}
+
 function buildSystemInstruction(
   coachContext: string | null,
   biometrics: { height_cm: number | null; weight_kg: number | null; gender: string | null },
   nutritionSummary: string,
   gymSummary: string | null,
   runningSummary: string | null,
-  gymEnabled: boolean,
+  raceEventsContext: string | null,
 ): string {
   const today = new Date().toLocaleDateString("pt-PT", {
     weekday: "long",
@@ -343,17 +450,24 @@ function buildSystemInstruction(
     `torna-se "Dá-me um plano de nutrição para hoje"). Não repitas no texto da resposta ` +
     `(campo "reply") o convite para essas perguntas — isso é só para o campo "suggestions". ` +
     `Se não fizer sentido nenhuma sugestão, deixa o array vazio.\n\n` +
+    `MUITO IMPORTANTE — proactividade perto de provas: se houver "Próximas provas agendadas" ` +
+    `no contexto abaixo, tem sempre em conta a proximidade da mais próxima ao dar qualquer ` +
+    `conselho de treino ou nutrição, mesmo que o utilizador não a mencione diretamente. ` +
+    `Regras gerais (ajusta com bom senso ao tipo de prova e distância):\n` +
+    `- Última semana antes da prova: sugere reduzir o volume de treino (tapering) — menos ` +
+    `quilómetros/carga, treinos mais curtos e leves, priorizar descanso e sono.\n` +
+    `- Últimos 2-3 dias antes da prova (sobretudo 10km+): sugere aumentar a proporção de ` +
+    `hidratos de carbono na alimentação e reduzir a intensidade do treino a quase zero.\n` +
+    `- Dia da prova ou no dia seguinte: pergunta como correu / parabeniza, sem impor um novo plano.\n` +
+    `Não forces este tópico se o utilizador perguntar algo completamente não relacionado (ex.: ` +
+    `um alimento específico) — menciona a prova próxima apenas quando for relevante ou quando ` +
+    `deres um conselho de treino/nutrição geral que deva ter isso em conta.\n\n` +
     `Data atual: ${today}.\n\n` +
-    (gymEnabled
-      ? `O contexto abaixo tem os dados de nutrição dos últimos 7 dias e os treinos de ginásio ` +
-        `dos últimos 30 dias. Se a pergunta do utilizador precisar de dados fora dessas janelas ` +
-        `(um mês específico, uma data no passado, "desde o início do ano", etc.), usa a função ` +
-        `get_nutrition_history (nutrição) ou get_gym_history (ginásio) com o intervalo de datas ` +
-        `necessário antes de responder.`
-      : `O contexto abaixo só tem os dados de nutrição dos últimos 7 dias. Se a pergunta do ` +
-        `utilizador precisar de dados de outro período (um mês específico, uma data no passado, ` +
-        `"desde o início do ano", etc.), usa a função get_nutrition_history com o intervalo de ` +
-        `datas necessário antes de responder.`);
+    `O contexto abaixo tem os dados de nutrição dos últimos 7 dias, os treinos de ginásio e as ` +
+    `corridas dos últimos 30 dias. Se a pergunta do utilizador precisar de dados fora dessas ` +
+    `janelas (um mês específico, uma data no passado, "desde o início do ano", etc.), usa a ` +
+    `função get_nutrition_history (nutrição), get_gym_history (ginásio) ou get_running_history ` +
+    `(corrida) com o intervalo de datas necessário antes de responder.`;
 
   const bio: string[] = [];
   if (biometrics.gender) bio.push(`Género: ${biometrics.gender === "F" ? "feminino" : "masculino"}`);
@@ -375,6 +489,7 @@ function buildSystemInstruction(
   sys += `\n\n${nutritionSummary}`;
   if (gymSummary) sys += `\n\n${gymSummary}`;
   if (runningSummary) sys += `\n\n${runningSummary}`;
+  if (raceEventsContext) sys += `\n\n${raceEventsContext}`;
 
   return sys;
 }
@@ -399,8 +514,6 @@ async function handler(req: Request): Promise<Response> {
     const { data: userData, error: userError } = await sb.auth.getUser();
     if (userError || !userData?.user) return jsonResponse({ error: "Sessão inválida" }, 401);
     const userId = userData.user.id;
-    // Ginásio em beta fechada — resumo, tool e menção no prompt só para esta conta.
-    const gymEnabled = userData.user.email === GYM_BETA_EMAIL;
 
     const body = await req.json();
     const message = typeof body.message === "string"
@@ -475,24 +588,50 @@ async function handler(req: Request): Promise<Response> {
       `Histórico dos ${NUTRITION_WINDOW_DAYS - 1} dias anteriores (metas diárias: ${g.calorie_goal ?? "–"} kcal / ${g.protein_goal ?? "–"}g proteína / ${g.carbs_goal ?? "–"}g hidratos / ${g.fat_goal ?? "–"}g gordura):\n` +
       historyLines.join("\n");
 
-    // ── Treinos de ginásio dos últimos 30 dias (só beta fechada) ─────────
+    // ── Treinos de ginásio dos últimos 30 dias ───────────────────────────
     // Janela maior que a nutrição porque os treinos são menos frequentes.
-    let gymSummary: string | null = null;
-    if (gymEnabled) {
-      const GYM_WINDOW_DAYS = 30;
-      const gymStartD = new Date();
-      gymStartD.setUTCDate(gymStartD.getUTCDate() - (GYM_WINDOW_DAYS - 1));
-      const gymStartISO = gymStartD.toISOString().slice(0, 10);
-      const { data: gymSessions } = await sb
-        .from("workout_sessions")
-        .select("date, name, status, workout_session_sets(reps, weight)")
-        .eq("user_id", userId)
-        .eq("status", "concluido")
-        .gte("date", gymStartISO)
-        .lte("date", todayISO)
-        .order("date", { ascending: false });
-      gymSummary = buildGymSummary(gymSessions || [], GYM_WINDOW_DAYS);
-    }
+    const GYM_WINDOW_DAYS = 30;
+    const gymStartD = new Date();
+    gymStartD.setUTCDate(gymStartD.getUTCDate() - (GYM_WINDOW_DAYS - 1));
+    const gymStartISO = gymStartD.toISOString().slice(0, 10);
+    const { data: gymSessions } = await sb
+      .from("workout_sessions")
+      .select("date, name, status, workout_session_sets(reps, weight)")
+      .eq("user_id", userId)
+      .eq("status", "concluido")
+      .gte("date", gymStartISO)
+      .lte("date", todayISO)
+      .order("date", { ascending: false });
+    const gymSummary = buildGymSummary(gymSessions || [], GYM_WINDOW_DAYS);
+
+    // ── Corridas dos últimos 30 dias ──────────────────────────────────────
+    const RUNNING_WINDOW_DAYS = 30;
+    const runStartD = new Date();
+    runStartD.setUTCDate(runStartD.getUTCDate() - (RUNNING_WINDOW_DAYS - 1));
+    const runStartISO = runStartD.toISOString().slice(0, 10);
+    const { data: recentRuns } = await sb
+      .from("runs")
+      .select("date, kind, training_type, distance_km, duration_seconds")
+      .eq("user_id", userId)
+      .gte("date", runStartISO)
+      .lte("date", todayISO)
+      .order("date", { ascending: false });
+    const runningSummary = buildRunningSummary(recentRuns || [], RUNNING_WINDOW_DAYS);
+
+    // ── Próximas provas agendadas (base da proactividade do Coach) ───────
+    // Inclui desde ontem (não só a partir de hoje) para o Coach poder
+    // perguntar "como correu?" no dia seguinte a uma prova.
+    const raceLookbackD = new Date();
+    raceLookbackD.setUTCDate(raceLookbackD.getUTCDate() - 1);
+    const raceLookbackISO = raceLookbackD.toISOString().slice(0, 10);
+    const { data: upcomingRaces } = await sb
+      .from("race_events")
+      .select("date, name, race_type, location, target_time")
+      .eq("user_id", userId)
+      .gte("date", raceLookbackISO)
+      .order("date", { ascending: true })
+      .limit(5);
+    const raceEventsContext = buildRaceEventsContext(upcomingRaces || [], todayISO);
 
     // ── Histórico de conversa (últimas MAX_HISTORY mensagens) ────────────
     const { data: history } = await sb
@@ -513,7 +652,6 @@ async function handler(req: Request): Promise<Response> {
     }
 
     // ── Construir pedido ao Gemini ───────────────────────────────────────
-    // runningSummary fica null até a vertical Corrida ter dados próprios.
     const systemInstruction = buildSystemInstruction(
       profile?.coach_context ?? null,
       {
@@ -523,8 +661,8 @@ async function handler(req: Request): Promise<Response> {
       },
       nutritionSummary,
       gymSummary,
-      null,
-      gymEnabled,
+      runningSummary,
+      raceEventsContext,
     );
 
     // deno-lint-ignore no-explicit-any
@@ -549,7 +687,7 @@ async function handler(req: Request): Promise<Response> {
           body: JSON.stringify({
             system_instruction: { parts: [{ text: systemInstruction }] },
             contents,
-            tools: buildTools(gymEnabled),
+            tools: buildTools(),
             generationConfig: {
               temperature: 0.7,
               maxOutputTokens: 1200,
@@ -618,8 +756,10 @@ async function handler(req: Request): Promise<Response> {
         let result: string;
         if (name === "get_nutrition_history") {
           result = await runGetNutritionHistory(sb, userId, args || {});
-        } else if (name === "get_gym_history" && gymEnabled) {
+        } else if (name === "get_gym_history") {
           result = await runGetGymHistory(sb, userId, args || {});
+        } else if (name === "get_running_history") {
+          result = await runGetRunningHistory(sb, userId, args || {});
         } else {
           result = `Erro: função desconhecida "${name}".`;
         }

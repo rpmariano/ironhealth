@@ -6,8 +6,13 @@
 
 import { createClient } from "jsr:@supabase/supabase-js@2";
 
-// Alias que segue sempre o modelo flash estável mais recente — evita 404s/429s
-// quando a Google descontinua uma versão fixa (mesmo alias usado em analyze-meal).
+// Alias que segue sempre o modelo flash estável mais recente — evita 404s
+// quando a Google descontinua uma versão fixa (confirmado em produção: fixar
+// em "gemini-2.5-flash" resultou em 404 "no longer available to new users"
+// dias depois). O preço de usar o alias é que os parâmetros aceites por
+// generationConfig podem mudar de geração para geração (ver thinkingConfig
+// abaixo) — por isso esta função evita depender de campos específicos de uma
+// geração de modelo.
 const GEMINI_MODEL = "gemini-flash-latest";
 const MAX_HISTORY   = 30;   // mensagens mais recentes enviadas ao Gemini
 const MAX_MSG_LEN   = 2000; // caracteres máximos por mensagem
@@ -690,15 +695,16 @@ async function handler(req: Request): Promise<Response> {
             tools: buildTools(),
             generationConfig: {
               temperature: 0.7,
-              maxOutputTokens: 1200,
-              // O gemini-flash-latest tem "thinking" ativado por omissão, e
-              // esses tokens contam para maxOutputTokens — em respostas
-              // curtas isso podia consumir o orçamento todo em raciocínio
-              // interno e cortar o JSON a meio (o utilizador via o JSON
-              // partido em vez da resposta). Desativado: não precisamos de
-              // raciocínio profundo para conselhos de coaching conversacional,
-              // e poupa tokens (cobrados como output) que nunca se viam.
-              thinkingConfig: { thinkingBudget: 0 },
+              // Sem thinkingConfig de propósito: o campo para desativar/limitar
+              // "thinking" mudou de nome entre gerações do modelo por trás do
+              // alias "-latest" (thinkingBudget vs. thinkingLevel — confirmado
+              // em produção: thinkingBudget causou 400 INVALID_ARGUMENT assim
+              // que o alias rodou para uma geração mais recente). Sem o campo,
+              // o pedido funciona com qualquer geração; em compensação
+              // maxOutputTokens fica bem acima do necessário para a resposta,
+              // para sobrar espaço aos tokens de raciocínio interno e a
+              // resposta não ser cortada a meio.
+              maxOutputTokens: 4000,
               response_mime_type: "application/json",
               response_schema: RESPONSE_SCHEMA,
             },
@@ -731,7 +737,10 @@ async function handler(req: Request): Promise<Response> {
             error: "O coach atingiu o limite de pedidos da API neste momento. Tenta novamente dentro de alguns minutos.",
           }, 503);
         }
-        return jsonResponse({ error: `Falha na resposta do coach (${geminiRes.status}). Tenta novamente.` }, 502);
+        return jsonResponse({
+          error: `Falha na resposta do coach (${geminiRes.status}). Tenta novamente.`,
+          detail: errText.slice(0, 500),
+        }, 502);
       }
 
       // deno-lint-ignore no-explicit-any

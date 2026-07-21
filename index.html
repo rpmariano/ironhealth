@@ -232,6 +232,8 @@
 
   <div id="toastStack" class="fixed top-0 inset-x-0 z-50 flex flex-col items-stretch gap-2 px-3 pt-3 pointer-events-none max-w-md mx-auto"></div>
 
+  <div id="coachClearModal"></div>
+
   <div class="sticky top-0 z-20 bg-neutral-950/90 backdrop-blur border-b border-neutral-800">
     <header class="px-4 pt-4 pb-3 flex items-center justify-between">
       <div class="flex items-center gap-2">
@@ -268,12 +270,12 @@
     </button>
     <button onclick="fabCreateAssessment()" type="button"
       class="flex items-center gap-2 bg-neutral-900 border border-neutral-800 pl-2.5 pr-3.5 py-2 rounded-full shadow-lg active:scale-95 transition">
-      <span class="w-7 h-7 rounded-full flex items-center justify-center text-white shrink-0" style="background:linear-gradient(135deg,#5b21b6,#a855f7);"><i data-lucide="scale" class="w-3.5 h-3.5"></i></span>
+      <span class="w-7 h-7 rounded-full flex items-center justify-center text-white shrink-0" style="background:linear-gradient(135deg,#5b21b6,#a855f7);"><i data-lucide="user" class="w-3.5 h-3.5"></i></span>
       <span class="text-xs font-semibold text-white whitespace-nowrap">Nova avaliação</span>
     </button>
     <button onclick="fabCreateRun()" type="button"
       class="flex items-center gap-2 bg-neutral-900 border border-neutral-800 pl-2.5 pr-3.5 py-2 rounded-full shadow-lg active:scale-95 transition">
-      <span class="w-7 h-7 rounded-full flex items-center justify-center text-white shrink-0" style="background:linear-gradient(135deg,#9a3412,#f97316);"><i data-lucide="footprints" class="w-3.5 h-3.5"></i></span>
+      <span class="w-7 h-7 rounded-full flex items-center justify-center text-white shrink-0" style="background:linear-gradient(135deg,#9a3412,#f97316);"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="w-3.5 h-3.5"><path d="M14.1 7.9 12.5 10"/><path d="M17.4 10.1 16 12"/><path d="M2 16a2 2 0 0 0 2 2h13c2.8 0 5-2.2 5-5a2 2 0 0 0-2-2c-.8 0-1.6-.2-2.2-.7l-6.2-4.2c-.4-.3-.9-.2-1.3.1 0 0-.6.8-1.2 1.1a3.5 3.5 0 0 1-4.2.1C4.4 7 3.7 6.3 3.7 6.3A.92.92 0 0 0 2 7Z"/><path d="M2 11c0 1.7 1.3 3 3 3h7"/></svg></span>
       <span class="text-xs font-semibold text-white whitespace-nowrap">Nova corrida</span>
     </button>
     <button onclick="fabCreateGymSession()" type="button"
@@ -298,10 +300,10 @@
     </button>
     <div aria-hidden="true"></div>
     <button onclick="switchVertical('corpo')" data-vert="corpo" title="Corpo" class="vbar-btn flex items-center justify-center py-2 text-slate-500 active:scale-95 transition">
-      <i data-lucide="scale" class="w-5 h-5"></i>
+      <i data-lucide="user" class="w-5 h-5"></i>
     </button>
     <button onclick="switchVertical('corrida')" data-vert="corrida" title="Corrida" class="vbar-btn flex items-center justify-center py-2 text-slate-500 active:scale-95 transition">
-      <i data-lucide="footprints" class="w-5 h-5"></i>
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="w-5 h-5"><path d="M14.1 7.9 12.5 10"/><path d="M17.4 10.1 16 12"/><path d="M2 16a2 2 0 0 0 2 2h13c2.8 0 5-2.2 5-5a2 2 0 0 0-2-2c-.8 0-1.6-.2-2.2-.7l-6.2-4.2c-.4-.3-.9-.2-1.3.1 0 0-.6.8-1.2 1.1a3.5 3.5 0 0 1-4.2.1C4.4 7 3.7 6.3 3.7 6.3A.92.92 0 0 0 2 7Z"/><path d="M2 11c0 1.7 1.3 3 3 3h7"/></svg>
     </button>
     <button onclick="switchVertical('coach')" data-vert="coach" title="Coach" class="vbar-btn flex items-center justify-center py-2 text-slate-500 active:scale-95 transition">
       <i data-lucide="bot" class="w-5 h-5"></i>
@@ -670,6 +672,15 @@ function formatDatePT(iso){
   return `${String(d).padStart(2,'0')} ${PT_MONTHS[m-1]} ${y}`;
 }
 function esc(s){ return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
+// Ícone de ténis inline: a lucide (carregada via CDN, sem bundler) não inclui
+// um ícone de sapatilha no set base — só existe em @lucide/lab, que não tem
+// build UMD utilizável aqui. Em vez de registar um nome de ícone customizado
+// (confirmámos que lucide.createIcons() não lê novas entradas adicionadas a
+// lucide.icons em runtime), inserimos o SVG diretamente onde a Corrida
+// precisa de ícone — substitui o antigo "footprints" (pés, não ténis).
+function sneakerIcon(cls){
+  return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="${cls}"><path d="M14.1 7.9 12.5 10"/><path d="M17.4 10.1 16 12"/><path d="M2 16a2 2 0 0 0 2 2h13c2.8 0 5-2.2 5-5a2 2 0 0 0-2-2c-.8 0-1.6-.2-2.2-.7l-6.2-4.2c-.4-.3-.9-.2-1.3.1 0 0-.6.8-1.2 1.1a3.5 3.5 0 0 1-4.2.1C4.4 7 3.7 6.3 3.7 6.3A.92.92 0 0 0 2 7Z"/><path d="M2 11c0 1.7 1.3 3 3 3h7"/></svg>`;
+}
 function uid(){ return 'tmp-' + Date.now().toString(36) + Math.random().toString(36).slice(2,7); }
 function hexToRgba(hex, alpha){
   const n = parseInt(hex.replace('#',''), 16);
@@ -2581,9 +2592,15 @@ function buildHomeCardsMap(totals, profile){
 // exibição é sempre fixa (CANONICAL_HOME_ORDER) — só a seleção é do
 // utilizador, por isso não há setas nem drag aqui.
 function homeCardRow(d, active){
+  // "footprints" (pés) não tem equivalente de ténis no set base da lucide —
+  // ver sneakerIcon() — por isso este cartão usa o SVG inline em vez de
+  // data-lucide como os restantes.
+  const icon = d.icon === 'footprints'
+    ? sneakerIcon('w-4 h-4 text-slate-400 shrink-0')
+    : `<i data-lucide="${d.icon}" class="w-4 h-4 text-slate-400 shrink-0"></i>`;
   return `
     <div class="flex items-center gap-2 bg-neutral-900/60 border border-neutral-800 rounded-xl px-2.5 py-2">
-      <i data-lucide="${d.icon}" class="w-4 h-4 text-slate-400 shrink-0"></i>
+      ${icon}
       <span class="text-xs text-white flex-1 truncate">${d.label}</span>
       <button onclick="toggleHomeCard('${d.key}')" type="button"
         class="w-9 h-5 rounded-full relative transition shrink-0 ${active ? 'bg-[var(--accent)]' : 'bg-neutral-700'}">
@@ -2845,7 +2862,7 @@ function renderCorrida(){
     <div class="space-y-4 fade-in">
       <div class="rounded-2xl p-4" style="${statCardBg('#f97316')}">
         <div class="flex items-center gap-2 mb-3">
-          <i data-lucide="footprints" class="w-4 h-4" style="color:#f97316"></i>
+          <span style="color:#f97316">${sneakerIcon('w-4 h-4')}</span>
           <h2 class="text-sm font-semibold text-white">Nova Corrida</h2>
         </div>
 
@@ -3730,7 +3747,7 @@ function renderAssessmentCard(a){
     <div id="assessment-card-${a.id}" class="card rounded-2xl overflow-hidden">
       <button onclick="toggleAssessmentExpand('${a.id}')" class="w-full flex items-center gap-3 p-3.5 text-left">
         <span class="w-10 h-10 rounded-xl flex items-center justify-center shrink-0 bg-[var(--accent)]/10 border border-[var(--accent)]/30">
-          <i data-lucide="scale" class="w-5 h-5 text-[var(--accent)]"></i>
+          <i data-lucide="user" class="w-5 h-5 text-[var(--accent)]"></i>
         </span>
         <div class="flex-1 min-w-0">
           <p class="text-sm font-semibold text-white">${formatDatePT(a.date)}</p>
@@ -3791,7 +3808,7 @@ function renderBodyDashboard(){
     return `
       <div class="min-h-[50vh] flex flex-col items-center justify-center text-center px-6 fade-in">
         <span class="w-16 h-16 rounded-3xl flex items-center justify-center mb-4" style="background:linear-gradient(135deg,#5b21b6,#a855f7);">
-          <i data-lucide="scale" class="w-7 h-7 text-white"></i>
+          <i data-lucide="user" class="w-7 h-7 text-white"></i>
         </span>
         <p class="text-xs text-slate-500 max-w-xs leading-relaxed">Ainda não tens avaliações. Vai ao Calendário para enviar o teu primeiro print da Renpho Health.</p>
         <button onclick="switchBodyTab('calendario')" class="mt-4 bg-[var(--accent)] text-neutral-950 font-bold text-xs rounded-xl px-4 py-2.5 flex items-center gap-1.5 active:scale-[0.98] transition">
@@ -4087,7 +4104,7 @@ const CORRIDA_NAV_HTML = `
       <div class="seg-nav relative flex bg-neutral-800 border border-neutral-700 rounded-full p-1">
         <span class="seg-thumb absolute inset-y-1 left-1 rounded-full bg-[var(--accent)]" style="width:calc(50% - 4px)"></span>
         <button onclick="switchCorridaTab('registo')" data-tab="registo" class="tab-btn seg-btn relative z-10 flex-1 flex items-center justify-center gap-1.5 py-2 text-[13px] font-semibold rounded-full text-slate-400 transition-colors">
-          <i data-lucide="footprints" class="w-4 h-4"></i>Registo
+          ${sneakerIcon('w-4 h-4')}Registo
         </button>
         <button onclick="switchCorridaTab('agenda')" data-tab="agenda" class="tab-btn seg-btn relative z-10 flex-1 flex items-center justify-center gap-1.5 py-2 text-[13px] font-semibold rounded-full text-slate-400 transition-colors">
           <i data-lucide="calendar-days" class="w-4 h-4"></i>Agenda
@@ -5436,7 +5453,7 @@ function renderPerfil(){
 
       <div class="card rounded-2xl p-4">
         <div class="flex items-center gap-2 mb-3">
-          <i data-lucide="scale" class="w-4 h-4 text-[var(--accent)]"></i>
+          <i data-lucide="user" class="w-4 h-4 text-[var(--accent)]"></i>
           <h2 class="text-sm font-semibold text-white">Avaliação Corporal</h2>
         </div>
         <div class="grid grid-cols-2 gap-2 mb-3">
@@ -5656,7 +5673,7 @@ function renderCoach() {
           </div>
         </div>
         ${msgs.length > 0 ? `
-          <button onclick="clearCoachConversation()"
+          <button onclick="openClearCoachModal()"
             class="text-[11px] text-slate-500 border border-neutral-700 rounded-lg px-2.5 py-1
                    active:border-red-500/50 active:text-red-400 transition flex items-center gap-1">
             <i data-lucide="trash-2" class="w-3 h-3"></i> Limpar
@@ -5746,7 +5763,11 @@ async function sendCoachMessage() {
       body: JSON.stringify({ message: text }),
     });
     const data = await res.json();
-    if (!res.ok) throw new Error(data.error || 'Erro no coach');
+    if (!res.ok) {
+      const err = new Error(data.error || 'Erro no coach');
+      err.detail = data.detail || null;
+      throw err;
+    }
 
     // Substitui a mensagem temporária pelas guardadas na BD + resposta do modelo
     coachMessages = coachMessages.filter(m => m.id !== '__tmp__');
@@ -5757,20 +5778,58 @@ async function sendCoachMessage() {
     const msg = e.message || 'Erro inesperado. Tenta novamente.';
     showToast('error', null, msg);
     coachMessages = coachMessages.filter(m => m.id !== '__tmp__');
-    logEvent('error', 'coach_message', msg);
+    logEvent('error', 'coach_message', msg, e.detail ? { detail: e.detail } : null);
   }
 
   coachLoading = false;
   renderCoachInPlace();
 }
 
-async function clearCoachConversation() {
-  if (!confirm('Limpar toda a conversa com o coach?')) return;
+// Modal próprio em vez de confirm() nativo: em alguns contextos de WebView/PWA
+// (onde a app corre instalada) o confirm() do browser fica silenciosamente
+// bloqueado — o clique não faz nada visível, sem erro nem aviso.
+function openClearCoachModal() {
+  const el = document.getElementById('coachClearModal');
+  if (!el) return;
+  el.innerHTML = `
+    <div class="fixed inset-0 z-[60] bg-black/70 flex items-center justify-center px-6"
+         onclick="if(event.target===this) closeClearCoachModal()">
+      <div class="bg-neutral-900 border border-neutral-800 rounded-2xl p-5 max-w-xs w-full">
+        <p class="text-sm font-bold text-white mb-2">Limpar toda a conversa com o Coach?</p>
+        <p class="text-xs text-slate-400 mb-4 leading-relaxed">
+          Esta ação apaga permanentemente todas as mensagens trocadas e não pode ser
+          desfeita. O Coach deixará de ter memória desta conversa.
+        </p>
+        <div class="flex gap-2">
+          <button onclick="closeClearCoachModal()"
+            class="flex-1 border border-neutral-700 text-slate-300 text-xs font-semibold rounded-xl py-2.5">
+            Cancelar
+          </button>
+          <button onclick="confirmClearCoachConversation()"
+            class="flex-1 border border-red-500/40 text-red-400 text-xs font-semibold rounded-xl py-2.5">
+            Limpar
+          </button>
+        </div>
+      </div>
+    </div>
+  `;
+  if (window.lucide) lucide.createIcons();
+}
+
+function closeClearCoachModal() {
+  const el = document.getElementById('coachClearModal');
+  if (el) el.innerHTML = '';
+}
+
+async function confirmClearCoachConversation() {
+  closeClearCoachModal();
   const { error } = await sb.from('coach_messages').delete().eq('user_id', currentUser.id);
   if (!error) {
     coachMessages = [];
     coachSuggestions = [];
     renderCoachInPlace();
+  } else {
+    showToast('error', null, 'Não foi possível limpar a conversa. Tenta novamente.');
   }
 }
 

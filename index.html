@@ -117,6 +117,10 @@
   .seg-thumb { transition: transform .28s cubic-bezier(.4,0,.2,1); }
   .seg-nav:has(.seg-btn[data-tab="calendario"].active) .seg-thumb,
   .seg-nav:has(.seg-btn[data-tab="agenda"].active) .seg-thumb { transform: translateX(100%); }
+  /* translateX é relativo à largura do próprio thumb, não do contentor — por
+     isso 200% funciona para "a 3ª de 3 abas" independentemente da largura
+     real de cada aba (nav da Nutrição, que agora tem Dashboard/Calendário/Água). */
+  .seg-nav:has(.seg-btn[data-tab="agua"].active) .seg-thumb { transform: translateX(200%); }
   .seg-btn.active { color:#09090b !important; }
 
   .range-chip.active { background:var(--accent); color:#09090b; border-color:var(--accent); }
@@ -323,6 +327,9 @@
 const SUPABASE_URL = 'https://roxfzsiciizkevopgpnl.supabase.co';
 const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InJveGZ6c2ljaWl6a2V2b3BncG5sIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODMyNjg0NDksImV4cCI6MjA5ODg0NDQ0OX0.bS7FyzDIqj4Aov18OXw6SsJrx1hT1DxYQfzmeHHH7bw';
 const sb = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+// Chave pública VAPID — só serve para o browser cifrar a subscrição push;
+// a privada fica só no servidor (secret da edge function), nunca aqui.
+const VAPID_PUBLIC_KEY = 'BL4SDjui7uHeUOLvyKOJ-VrcGx3SadjPvz4lw5KABx9NwcL3N3awjiPk__Uhiizupgb_haaMKjaykFu-x1y26v4';
 
 /* ============================= CONSTANTES ============================= */
 const MEAL_TYPES = [
@@ -652,6 +659,11 @@ let calendarLoading = false;
    Calendário (ou do FAB), nunca pelo nav. ===== */
 let bodyAssessments = [];      // [{ ...avaliação }] ordenadas por data desc
 let bodyTab = 'dashboard';     // 'dashboard' | 'avaliar' | 'calendario'
+
+/* ===== Água (dentro da vertical Nutrição) — separador próprio "Água" ===== */
+let waterLogs = [];             // [{ id, date, amount_ml, created_at }] últimos 14 dias, desc
+let waterBusy = false;          // desativa os botões de adição enquanto grava, evita duplo-toque
+let waterSubscribing = false;   // idem, para o toggle de notificações (pede permissão + subscreve)
 let bodyPhotos = [];           // [{ dataUrl, base64 }] prints comprimidos prontos a enviar
 let bodyDate = todayISO();     // data pré-preenchida da nova avaliação
 let bodyNotes = '';            // observação livre antes da análise
@@ -989,6 +1001,18 @@ async function loadAllData(){
       .order('date', { ascending: false })
       .order('created_at', { ascending: false });
     gymSessions = sessions || [];
+
+    // Registo de água — só os últimos 14 dias (é um separador "hoje +
+    // histórico curto", não precisa do histórico completo como Corpo/Corrida).
+    const waterStartD = new Date();
+    waterStartD.setUTCDate(waterStartD.getUTCDate() - 13);
+    const { data: waterData } = await sb
+      .from('water_logs')
+      .select('*')
+      .eq('user_id', userId)
+      .gte('date', waterStartD.toISOString().slice(0, 10))
+      .order('created_at', { ascending: false });
+    waterLogs = waterData || [];
 
   } catch(e) {
     console.error(e);
@@ -2113,6 +2137,7 @@ function renderScreen(){
   if (activeTab === 'dashboard') main.innerHTML = renderDashboard();
   else if (activeTab === 'registar') main.innerHTML = renderRegistar();
   else if (activeTab === 'calendario') main.innerHTML = renderCalendario();
+  else if (activeTab === 'agua') main.innerHTML = renderAgua();
   else if (activeTab === 'perfil') main.innerHTML = renderPerfil();
 
   if (window.lucide) lucide.createIcons();
@@ -4072,12 +4097,15 @@ function renderBodyChart(){
 const NUTRITION_NAV_HTML = `
     <div class="max-w-md mx-auto bg-neutral-900/95 backdrop-blur border-b border-neutral-800 px-4 py-2.5">
       <div class="seg-nav relative flex bg-neutral-800 border border-neutral-700 rounded-full p-1">
-        <span class="seg-thumb absolute inset-y-1 left-1 rounded-full bg-[var(--accent)]" style="width:calc(50% - 4px)"></span>
+        <span class="seg-thumb absolute inset-y-1 left-1 rounded-full bg-[var(--accent)]" style="width:calc(33.333% - 4px)"></span>
         <button onclick="switchTab('dashboard')" data-tab="dashboard" class="tab-btn seg-btn relative z-10 flex-1 flex items-center justify-center gap-1.5 py-2 text-[13px] font-semibold rounded-full text-slate-400 transition-colors">
           <i data-lucide="layout-dashboard" class="w-4 h-4"></i>Dashboard
         </button>
         <button onclick="switchTab('calendario')" data-tab="calendario" class="tab-btn seg-btn relative z-10 flex-1 flex items-center justify-center gap-1.5 py-2 text-[13px] font-semibold rounded-full text-slate-400 transition-colors">
           <i data-lucide="calendar-days" class="w-4 h-4"></i>Calendário
+        </button>
+        <button onclick="switchTab('agua')" data-tab="agua" class="tab-btn seg-btn relative z-10 flex-1 flex items-center justify-center gap-1.5 py-2 text-[13px] font-semibold rounded-full text-slate-400 transition-colors">
+          <i data-lucide="droplet" class="w-4 h-4"></i>Água
         </button>
       </div>
     </div>`;
@@ -5833,6 +5861,266 @@ async function confirmClearCoachConversation() {
   }
 }
 
+/* ============================= ÁGUA (separador dentro de Nutrição) ============================= */
+const WATER_QUICK_AMOUNTS = [250, 500, 750]; // ml
+const WATER_REMINDER_INTERVALS = [30, 60, 90, 120, 180, 240]; // minutos
+
+function todayWaterLogs(){
+  return waterLogs.filter(w => w.date === todayISO());
+}
+function todayWaterTotalMl(){
+  return todayWaterLogs().reduce((sum, w) => sum + (w.amount_ml || 0), 0);
+}
+function waterGoalMl(){
+  return Number(state.profile?.water_goal_ml) || 2000;
+}
+
+function renderAguaInPlace(){
+  if (activeVertical !== 'nutricao' || activeTab !== 'agua') return;
+  const main = document.getElementById('tab-content');
+  if (!main) return;
+  main.innerHTML = renderAgua();
+  if (window.lucide) lucide.createIcons();
+}
+
+// UI otimista igual ao padrão já usado no Coach: mostra logo o registo, e
+// desfaz se a escrita na BD falhar — sem isto, cada copo bebido tinha um
+// atraso visível até aparecer.
+async function logWater(amountMl){
+  if (waterBusy || !amountMl || amountMl <= 0) return;
+  waterBusy = true;
+  const tempId = '__tmp_water__' + Date.now();
+  waterLogs = [{ id: tempId, user_id: currentUser.id, date: todayISO(), amount_ml: amountMl, created_at: new Date().toISOString() }, ...waterLogs];
+  renderAguaInPlace();
+  try {
+    const { data, error } = await sb.from('water_logs')
+      .insert({ user_id: currentUser.id, date: todayISO(), amount_ml: amountMl })
+      .select().single();
+    if (error) throw error;
+    waterLogs = waterLogs.map(w => w.id === tempId ? data : w);
+    // Beber conta como "atividade" — reinicia a contagem do próximo lembrete
+    // (ver send-water-reminders: usa este campo para saber se já é devido).
+    const nowIso = new Date().toISOString();
+    await sb.from('profiles').update({ water_last_activity_at: nowIso }).eq('id', currentUser.id);
+    if (state.profile) state.profile.water_last_activity_at = nowIso;
+  } catch(e) {
+    waterLogs = waterLogs.filter(w => w.id !== tempId);
+    showToast('error', null, e.message || 'Não foi possível registar a água.');
+  }
+  waterBusy = false;
+  renderAguaInPlace();
+}
+
+function logCustomWaterAmount(){
+  const el = document.getElementById('waterCustomAmount');
+  if (!el) return;
+  const n = Math.round(Number(el.value));
+  if (!Number.isFinite(n) || n <= 0) { showToast('error', null, 'Quantidade inválida.'); return; }
+  el.value = '';
+  logWater(n);
+}
+
+async function removeWaterLog(id){
+  const prev = waterLogs;
+  waterLogs = waterLogs.filter(w => w.id !== id);
+  renderAguaInPlace();
+  const { error } = await sb.from('water_logs').delete().eq('id', id);
+  if (error) {
+    waterLogs = prev;
+    showToast('error', null, 'Não foi possível remover o registo.');
+    renderAguaInPlace();
+  }
+}
+
+async function saveWaterGoal(ml){
+  const n = Math.round(Number(ml));
+  if (!Number.isFinite(n) || n <= 0) { showToast('error', null, 'Meta inválida.'); return; }
+  const { error } = await sb.from('profiles').update({ water_goal_ml: n }).eq('id', currentUser.id);
+  if (error) { showToast('error', null, 'Não foi possível guardar a meta.'); return; }
+  state.profile.water_goal_ml = n;
+  showToast('success', null, 'Meta atualizada.');
+  renderAguaInPlace();
+}
+
+async function setWaterReminderInterval(minutes){
+  const n = Number(minutes);
+  if (!Number.isFinite(n) || n <= 0) return;
+  const { error } = await sb.from('profiles').update({ water_reminder_interval_minutes: n }).eq('id', currentUser.id);
+  if (!error) { state.profile.water_reminder_interval_minutes = n; }
+}
+
+// Converte a chave pública VAPID (base64url, formato standard do Web Push)
+// para o Uint8Array que PushManager.subscribe() exige.
+function urlBase64ToUint8Array(base64String){
+  const padding = '='.repeat((4 - base64String.length % 4) % 4);
+  const base64 = (base64String + padding).replace(/-/g, '+').replace(/_/g, '/');
+  const rawData = atob(base64);
+  const outputArray = new Uint8Array(rawData.length);
+  for (let i = 0; i < rawData.length; i++) outputArray[i] = rawData.charCodeAt(i);
+  return outputArray;
+}
+
+// Pede permissão de notificações, subscreve o PushManager (ou reaproveita
+// uma subscrição existente) e guarda-a no servidor. Devolve false em
+// qualquer falha (permissão recusada, browser sem suporte, erro de rede) —
+// quem chama decide a mensagem/estado a mostrar.
+async function ensurePushSubscription(){
+  if (!('serviceWorker' in navigator) || !('PushManager' in window)) {
+    showToast('error', null, 'Este browser não suporta notificações push.');
+    return false;
+  }
+  try {
+    const permission = await Notification.requestPermission();
+    if (permission !== 'granted') {
+      showToast('error', null, 'Permissão de notificações recusada.');
+      return false;
+    }
+    const reg = await navigator.serviceWorker.ready;
+    let sub = await reg.pushManager.getSubscription();
+    if (!sub) {
+      sub = await reg.pushManager.subscribe({
+        userVisibleOnly: true,
+        applicationServerKey: urlBase64ToUint8Array(VAPID_PUBLIC_KEY),
+      });
+    }
+    const json = sub.toJSON();
+    const { data: { session } } = await sb.auth.getSession();
+    const res = await fetch(`${SUPABASE_URL}/functions/v1/save-push-subscription`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${session.access_token}`,
+        'apikey': SUPABASE_ANON_KEY,
+      },
+      body: JSON.stringify({ endpoint: json.endpoint, keys: json.keys }),
+    });
+    if (!res.ok) throw new Error('Falha a guardar subscrição no servidor');
+    return true;
+  } catch(e) {
+    console.error(e);
+    showToast('error', null, 'Não foi possível ativar as notificações.');
+    return false;
+  }
+}
+
+async function toggleWaterReminder(){
+  const enabling = !state.profile.water_reminder_enabled;
+  if (enabling) {
+    waterSubscribing = true;
+    renderAguaInPlace();
+    const ok = await ensurePushSubscription();
+    waterSubscribing = false;
+    if (!ok) { renderAguaInPlace(); return; }
+  }
+  const nowIso = new Date().toISOString();
+  const patch = { water_reminder_enabled: enabling };
+  if (enabling) patch.water_last_activity_at = nowIso; // começa a contagem já, não do último registo antigo
+  const { error } = await sb.from('profiles').update(patch).eq('id', currentUser.id);
+  if (error) { showToast('error', null, 'Não foi possível guardar.'); renderAguaInPlace(); return; }
+  state.profile.water_reminder_enabled = enabling;
+  if (enabling) state.profile.water_last_activity_at = nowIso;
+  showToast('success', null, enabling ? 'Lembretes de água ativados.' : 'Lembretes de água desativados.');
+  renderAguaInPlace();
+}
+
+function renderAgua(){
+  const total = todayWaterTotalMl();
+  const goal = waterGoalMl();
+  const pct = goal > 0 ? Math.min(100, Math.round((total / goal) * 100)) : 0;
+  const p = state.profile || {};
+  const todayEntries = todayWaterLogs();
+  const reminderOn = !!p.water_reminder_enabled;
+  const interval = Number(p.water_reminder_interval_minutes) || 120;
+
+  return `
+    <div class="space-y-4 fade-in">
+      <div class="rounded-2xl p-5 text-center" style="${statCardBg('#38bdf8')}">
+        <p class="text-[11px] font-semibold text-slate-500 uppercase tracking-wide mb-1">Água hoje</p>
+        <p class="text-4xl font-black text-white">${total}<span class="text-lg font-bold text-slate-500"> ml</span></p>
+        <p class="text-xs text-slate-500 mt-1">${pct}% da meta de ${goal} ml</p>
+        <div class="w-full h-2 bg-neutral-800 rounded-full overflow-hidden mt-3">
+          <div class="h-full rounded-full transition-all" style="width:${pct}%; background:#38bdf8;"></div>
+        </div>
+      </div>
+
+      <div class="grid grid-cols-3 gap-2">
+        ${WATER_QUICK_AMOUNTS.map(ml => `
+          <button onclick="logWater(${ml})" ${waterBusy ? 'disabled' : ''} type="button"
+            class="flex flex-col items-center gap-1 bg-neutral-900/60 border border-neutral-800 rounded-xl py-3 active:scale-95 transition disabled:opacity-50">
+            <i data-lucide="droplet" class="w-4 h-4" style="color:#38bdf8"></i>
+            <span class="text-xs font-semibold text-white">${ml} ml</span>
+          </button>
+        `).join('')}
+      </div>
+
+      <div class="flex gap-2">
+        <input id="waterCustomAmount" type="number" min="1" placeholder="Outra quantidade (ml)"
+          class="flex-1 bg-neutral-900 border border-neutral-800 rounded-xl px-3 py-2.5 text-sm text-white outline-none focus:border-[var(--accent)]/60" />
+        <button onclick="logCustomWaterAmount()" ${waterBusy ? 'disabled' : ''} type="button"
+          class="shrink-0 bg-[var(--accent)] text-neutral-950 font-bold text-xs rounded-xl px-4 disabled:opacity-50">
+          + Adicionar
+        </button>
+      </div>
+
+      ${todayEntries.length ? `
+        <div class="card rounded-2xl p-4">
+          <h2 class="text-xs font-semibold text-slate-500 uppercase tracking-wide mb-2">Registos de hoje</h2>
+          <div class="space-y-1.5">
+            ${todayEntries.map(w => `
+              <div class="flex items-center justify-between bg-neutral-900/60 border border-neutral-800 rounded-xl px-3 py-2">
+                <span class="text-xs text-white">${w.amount_ml} ml</span>
+                <div class="flex items-center gap-2">
+                  <span class="text-[10px] text-slate-500">${new Date(w.created_at).toLocaleTimeString('pt-PT', {hour:'2-digit', minute:'2-digit'})}</span>
+                  <button onclick="removeWaterLog('${w.id}')" type="button" class="text-slate-500 active:text-red-400">
+                    <i data-lucide="x" class="w-3.5 h-3.5"></i>
+                  </button>
+                </div>
+              </div>
+            `).join('')}
+          </div>
+        </div>
+      ` : ''}
+
+      <div class="card rounded-2xl p-4 space-y-3">
+        <h2 class="text-xs font-semibold text-slate-500 uppercase tracking-wide">Definições</h2>
+
+        <div>
+          <label class="text-[11px] text-slate-500">Meta diária (ml)</label>
+          <div class="flex gap-2 mt-1">
+            <input id="waterGoalInput" type="number" min="1" step="50" value="${goal}"
+              class="flex-1 bg-neutral-900 border border-neutral-800 rounded-xl px-3 py-2 text-sm text-white outline-none focus:border-[var(--accent)]/60" />
+            <button onclick="saveWaterGoal(document.getElementById('waterGoalInput').value)" type="button"
+              class="shrink-0 border border-neutral-700 text-slate-300 text-xs font-semibold rounded-xl px-3">Guardar</button>
+          </div>
+        </div>
+
+        <div class="flex items-center justify-between pt-2 border-t border-neutral-800">
+          <div class="pr-3">
+            <p class="text-xs font-semibold text-white">Lembretes</p>
+            <p class="text-[11px] text-slate-500 leading-relaxed">Notificação de X em X tempo se ainda não tiveres registado água.</p>
+          </div>
+          <button onclick="toggleWaterReminder()" ${waterSubscribing ? 'disabled' : ''} type="button"
+            class="w-11 h-6 rounded-full relative transition shrink-0 disabled:opacity-50 ${reminderOn ? 'bg-[var(--accent)]' : 'bg-neutral-700'}">
+            <span class="absolute top-0.5 ${reminderOn ? 'left-5' : 'left-0.5'} w-5 h-5 rounded-full bg-white transition-all"></span>
+          </button>
+        </div>
+
+        ${reminderOn ? `
+          <div>
+            <label class="text-[11px] text-slate-500">De quanto em quanto tempo</label>
+            <select onchange="setWaterReminderInterval(this.value)"
+              class="w-full mt-1 bg-neutral-900 border border-neutral-800 rounded-xl px-3 py-2 text-sm text-white outline-none focus:border-[var(--accent)]/60">
+              ${WATER_REMINDER_INTERVALS.map(m => `
+                <option value="${m}" ${m === interval ? 'selected' : ''}>${m < 60 ? m + ' min' : (m/60) + 'h'}</option>
+              `).join('')}
+            </select>
+          </div>
+        ` : ''}
+      </div>
+    </div>
+  `;
+}
+
 /* ============================= ADMIN: PAINEL ============================= */
 const ADMIN_TABS = [
   { key:'overview', label:'Visão Geral', icon:'layout-grid' },
@@ -6145,6 +6433,11 @@ function renderAdminLogs(){
 document.addEventListener('DOMContentLoaded', () => {
   render();
   history.replaceState(navSnapshot(), '');
+  // Independente do login: só recebe notificações push (lembretes de água)
+  // se estiver registado, mas registar não exige sessão nem faz nada visível.
+  if ('serviceWorker' in navigator) {
+    navigator.serviceWorker.register('sw.js').catch((e) => console.error('SW falhou:', e));
+  }
   sb.auth.onAuthStateChange(async (event, session) => {
     const newUser = session ? session.user : null;
     const wasLoggedIn = !!currentUser;
@@ -6167,6 +6460,9 @@ document.addEventListener('DOMContentLoaded', () => {
       expandedAssessmentId = null;
       bodyCalendarViewMonth = todayISO().slice(0,7);
       bodyCalendarSelectedDate = todayISO();
+      waterLogs = [];
+      waterBusy = false;
+      waterSubscribing = false;
       showAdminPanel = false;
       adminData = null;
       adminSelectedUserId = null;

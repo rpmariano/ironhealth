@@ -266,6 +266,8 @@
 
   <div id="waterMuteModal"></div>
 
+  <div id="perfilLeaveModal"></div>
+
   <div class="sticky top-0 z-20 bg-neutral-950/90 backdrop-blur border-b border-neutral-800">
     <header class="px-4 pt-4 pb-3 flex items-center justify-between">
       <div class="flex items-center gap-2">
@@ -531,6 +533,17 @@ function applyNavSnapshot(s){
   suppressNavPush = false;
 }
 window.addEventListener('popstate', (e) => {
+  // O browser já moveu o histórico para trás nesta altura — activeVertical/
+  // activeTab (lidos por isPerfilDirty) ainda não mudaram, por isso isto
+  // continua a refletir corretamente "estávamos no Perfil". Se houver
+  // alterações por gravar, empurra a snapshot atual de volta ao topo (para
+  // não ficar com o URL a apontar para outro ecrã enquanto ainda se mostra
+  // o Perfil) e só aplica o "voltar" de facto depois de resolvido.
+  if (isPerfilDirty()) {
+    history.pushState(navSnapshot(), '');
+    openPerfilLeaveModal(() => applyNavSnapshot(e.state));
+    return;
+  }
   applyNavSnapshot(e.state);
 });
 
@@ -700,6 +713,14 @@ let expandedAssessmentId = null;
 let reanalyzingAssessmentId = null;
 let suggestingGoals = false;      // pedido ao Coach para definir objetivos de Corpo+Nutrição (Perfil)
 let goalsRationale = null;        // explicação do Coach para os últimos objetivos sugeridos
+
+// Perfil tem um único botão "Guardar" para todos os campos — perfilDirty
+// marca se algum foi editado desde a última gravação (ou desde que se entrou
+// no ecrã), para avisar antes de sair sem gravar (voltar atrás ou trocar de
+// módulo). pendingLeaveAction guarda o que fazer a seguir depois de o
+// utilizador escolher gravar/descartar no aviso.
+let perfilDirty = false;
+let pendingLeaveAction = null; // function | null
 let selectedBodyMetric = 'weight_kg'; // métrica mostrada no gráfico do dashboard
 let bodyChart = null;
 let bodyCalendarViewMonth = todayISO().slice(0,7); // 'YYYY-MM' do mês visível
@@ -1228,13 +1249,19 @@ async function submitNewItem(mealId){
   render();
 }
 
+// Único botão "Guardar" do Perfil — cobre todos os campos editáveis do
+// ecrã (Pessoal, Contexto do Coach, Avaliação Corporal, Nutrição/Água).
+// Os que já gravam de imediato ao tocar (toggle de lembretes, tema) ficam
+// fora de propósito — não fazem parte do estado "por guardar".
 async function saveProfileFromForm(){
   const get = id => Number(document.getElementById(id).value);
   const name = document.getElementById('pfName').value.trim();
   const gender = document.getElementById('pfGender').value;
+  const coachCtx = (document.getElementById('pfCoachCtx')?.value || '').trim();
   const updates = {
     display_name: name || state.profile.display_name,
     gender: gender || null,
+    coach_context: coachCtx,
     height_cm: get('pfHeight') > 0 ? get('pfHeight') : null,
     weight_kg: get('pfWeight') > 0 ? get('pfWeight') : null,
     calorie_goal: get('pfCal') > 0 ? get('pfCal') : state.profile.calorie_goal,
@@ -1252,6 +1279,7 @@ async function saveProfileFromForm(){
     updates['goal_' + m.key] = raw === '' ? null : Math.max(0, Number(raw));
   });
   Object.assign(state.profile, updates);
+  perfilDirty = false;
   render();
   try {
     const { error } = await sb.from('profiles').update(updates).eq('id', currentUser.id);
@@ -1259,6 +1287,69 @@ async function saveProfileFromForm(){
     const ok = document.getElementById('pfSaved');
     if (ok) { ok.classList.remove('hidden'); setTimeout(()=>ok.classList.add('hidden'), 2500); }
   } catch(e) { flashSyncError(e); }
+}
+
+// Chama o botão "Guardar" e só avança para a navegação pendente (voltar
+// atrás / trocar de módulo) depois de a gravação terminar — usado pelo
+// modal "sair sem gravar?" quando o utilizador escolhe gravar primeiro.
+async function saveProfileAndContinue(){
+  await saveProfileFromForm();
+  const next = pendingLeaveAction;
+  pendingLeaveAction = null;
+  closePerfilLeaveModal();
+  if (next) next();
+}
+
+function markPerfilDirty(){
+  perfilDirty = true;
+}
+
+function isPerfilDirty(){
+  return activeVertical === 'nutricao' && activeTab === 'perfil' && perfilDirty;
+}
+
+// Modal "sair sem gravar?" — intercetado tanto ao trocar de módulo
+// (switchVertical) como ao usar o botão/gesto físico "voltar" (popstate,
+// ver window.addEventListener('popstate', ...) mais abaixo). `action` é a
+// navegação a executar depois de resolvido (gravar-e-sair ou descartar).
+function openPerfilLeaveModal(action){
+  pendingLeaveAction = action;
+  const el = document.getElementById('perfilLeaveModal');
+  if (!el) return;
+  el.innerHTML = `
+    <div class="fixed inset-0 z-[60] bg-black/70 flex items-center justify-center px-6">
+      <div class="bg-neutral-900 border border-neutral-800 rounded-2xl p-5 max-w-xs w-full">
+        <p class="text-sm font-bold text-white mb-1">Tens alterações por gravar</p>
+        <p class="text-xs text-slate-400 mb-4 leading-relaxed">Queres gravá-las antes de sair do Perfil?</p>
+        <div class="space-y-2">
+          <button onclick="saveProfileAndContinue()"
+            class="w-full bg-[var(--accent)] text-neutral-950 text-xs font-bold rounded-xl py-2.5">
+            Gravar e sair
+          </button>
+          <button onclick="discardPerfilAndLeave()"
+            class="w-full border border-red-500/40 text-red-400 text-xs font-semibold rounded-xl py-2.5">
+            Sair sem gravar
+          </button>
+          <button onclick="closePerfilLeaveModal()"
+            class="w-full text-slate-500 text-xs font-semibold rounded-xl py-2">
+            Cancelar
+          </button>
+        </div>
+      </div>
+    </div>
+  `;
+}
+function closePerfilLeaveModal(){
+  pendingLeaveAction = null;
+  const el = document.getElementById('perfilLeaveModal');
+  if (el) el.innerHTML = '';
+}
+function discardPerfilAndLeave(){
+  perfilDirty = false;
+  const next = pendingLeaveAction;
+  pendingLeaveAction = null;
+  closePerfilLeaveModal();
+  if (next) next();
 }
 
 // Pede ao Coach para sugerir objetivos de Corpo (goal_*) e de Nutrição
@@ -1673,6 +1764,13 @@ function abandonManualMealSession(){
 
 // Troca de vertical (Início / Nutrição / Ginásio / Corrida / Coach).
 function switchVertical(vertical){
+  // Qualquer troca de módulo sai do Perfil (é só acedido via activeTab
+  // 'perfil' dentro de 'nutricao') — se houver alterações por gravar,
+  // pergunta antes; ao resolver, esta mesma chamada repete-se sozinha.
+  if (isPerfilDirty()) {
+    openPerfilLeaveModal(() => switchVertical(vertical));
+    return;
+  }
   activeVertical = vertical;
   abandonManualMealSession();
   // Registar e Perfil são acedidos por atalhos dedicados, não pelo nav inferior
@@ -1762,6 +1860,7 @@ function goToAvaliarForDate(dateIso){
 function goToPerfil(){
   activeVertical = 'nutricao';
   activeTab = 'perfil';
+  perfilDirty = false;
   abandonManualMealSession();
   render();
   pushNavState();
@@ -5468,12 +5567,12 @@ function renderPerfil(){
         <div class="space-y-2">
           <div>
             <label class="text-[11px] text-slate-500">Nome</label>
-            <input id="pfName" type="text" value="${esc(p.display_name||'')}"
+            <input id="pfName" type="text" value="${esc(p.display_name||'')}" oninput="markPerfilDirty()"
               class="w-full bg-neutral-900 border border-neutral-800 rounded-xl px-3 py-2 text-sm text-white outline-none focus:border-[var(--accent)]/60" />
           </div>
           <div>
             <label class="text-[11px] text-slate-500">Género</label>
-            <select id="pfGender"
+            <select id="pfGender" onchange="markPerfilDirty()"
               class="w-full bg-neutral-900 border border-neutral-800 rounded-xl px-2 py-2 text-sm text-white outline-none focus:border-[var(--accent)]/60">
               <option value="" ${!p.gender?'selected':''}>–</option>
               <option value="F" ${p.gender==='F'?'selected':''}>Feminino</option>
@@ -5518,12 +5617,12 @@ function renderPerfil(){
         <div class="grid grid-cols-2 gap-2 mb-3">
           <div>
             <label class="text-[11px] text-slate-500">Altura (cm)</label>
-            <input id="pfHeight" type="number" min="1" value="${p.height_cm||''}"
+            <input id="pfHeight" type="number" min="1" value="${p.height_cm||''}" oninput="markPerfilDirty()"
               class="w-full bg-neutral-900 border border-neutral-800 rounded-xl px-3 py-2 text-sm text-white outline-none focus:border-[var(--accent)]/60" />
           </div>
           <div>
             <label class="text-[11px] text-slate-500">Peso atual (kg)</label>
-            <input id="pfWeight" type="number" min="1" step="0.1" value="${p.weight_kg||''}"
+            <input id="pfWeight" type="number" min="1" step="0.1" value="${p.weight_kg||''}" oninput="markPerfilDirty()"
               class="w-full bg-neutral-900 border border-neutral-800 rounded-xl px-3 py-2 text-sm text-white outline-none focus:border-[var(--accent)]/60" />
           </div>
         </div>
@@ -5534,11 +5633,27 @@ function renderPerfil(){
             <div>
               <label class="text-[11px] text-slate-500 truncate block">${m.label}${m.unit ? ` (${m.unit})` : ''}</label>
               <input id="pfGoal_${m.key}" type="number" min="0" step="${m.dec === 0 ? '1' : '0.1'}"
-                value="${p['goal_' + m.key] ?? ''}"
+                value="${p['goal_' + m.key] ?? ''}" oninput="markPerfilDirty()"
                 class="w-full bg-neutral-900 border border-neutral-800 rounded-xl px-3 py-2 text-sm text-white outline-none focus:border-[var(--accent)]/60" />
             </div>
           `).join('')}
         </div>
+      </div>
+
+      <div class="card rounded-2xl p-4">
+        <div class="flex items-center gap-2 mb-1">
+          <i data-lucide="bot" class="w-4 h-4 text-[var(--accent)]"></i>
+          <h2 class="text-sm font-semibold text-white">Contexto do Coach</h2>
+        </div>
+        <p class="text-[11px] text-slate-500 mb-2 leading-relaxed">
+          Descreve os teus objetivos, lesões ou preferências. O coach terá sempre isto em conta em todas as conversas.
+        </p>
+        <textarea id="pfCoachCtx" rows="5" oninput="markPerfilDirty()"
+          placeholder="Ex: Quero correr uma meia maratona em Novembro. Tenho uma lesão no joelho direito. Objetivo: ganhar massa muscular mantendo o peso atual."
+          class="w-full bg-neutral-900 border border-neutral-800 rounded-xl px-3 py-2 text-sm text-white
+                 outline-none focus:border-[var(--accent)]/60 resize-none leading-relaxed
+                 placeholder-slate-600"
+        >${esc(p.coach_context||'')}</textarea>
       </div>
 
       <div class="card rounded-2xl p-4">
@@ -5549,34 +5664,30 @@ function renderPerfil(){
         <div class="grid grid-cols-2 gap-2">
           <div>
             <label class="text-[11px] text-slate-500">Meta calorias (kcal/dia)</label>
-            <input id="pfCal" type="number" min="1" value="${p.calorie_goal||2000}"
+            <input id="pfCal" type="number" min="1" value="${p.calorie_goal||2000}" oninput="markPerfilDirty()"
               class="w-full bg-neutral-900 border border-neutral-800 rounded-xl px-3 py-2 text-sm text-white outline-none focus:border-[var(--accent)]/60" />
           </div>
           <div>
             <label class="text-[11px] text-slate-500">Meta proteína (g/dia)</label>
-            <input id="pfPro" type="number" min="1" value="${p.protein_goal||150}"
+            <input id="pfPro" type="number" min="1" value="${p.protein_goal||150}" oninput="markPerfilDirty()"
               class="w-full bg-neutral-900 border border-neutral-800 rounded-xl px-3 py-2 text-sm text-white outline-none focus:border-[var(--accent)]/60" />
           </div>
           <div>
             <label class="text-[11px] text-slate-500">Meta hidratos (g/dia)</label>
-            <input id="pfCarb" type="number" min="1" value="${p.carbs_goal||200}"
+            <input id="pfCarb" type="number" min="1" value="${p.carbs_goal||200}" oninput="markPerfilDirty()"
               class="w-full bg-neutral-900 border border-neutral-800 rounded-xl px-3 py-2 text-sm text-white outline-none focus:border-[var(--accent)]/60" />
           </div>
           <div>
             <label class="text-[11px] text-slate-500">Meta gordura (g/dia)</label>
-            <input id="pfFat" type="number" min="1" value="${p.fat_goal||70}"
+            <input id="pfFat" type="number" min="1" value="${p.fat_goal||70}" oninput="markPerfilDirty()"
               class="w-full bg-neutral-900 border border-neutral-800 rounded-xl px-3 py-2 text-sm text-white outline-none focus:border-[var(--accent)]/60" />
           </div>
           <div>
             <label class="text-[11px] text-slate-500">Meta água (ml/dia)</label>
-            <input id="pfWaterGoal" type="number" min="1" step="50" value="${p.water_goal_ml||2000}"
+            <input id="pfWaterGoal" type="number" min="1" step="50" value="${p.water_goal_ml||2000}" oninput="markPerfilDirty()"
               class="w-full bg-neutral-900 border border-neutral-800 rounded-xl px-3 py-2 text-sm text-white outline-none focus:border-[var(--accent)]/60" />
           </div>
         </div>
-        <p id="pfSaved" class="hidden text-[11px] text-emerald-400 flex items-center gap-1 mt-2"><i data-lucide="check" class="w-3.5 h-3.5"></i> Guardado.</p>
-        <button onclick="saveProfileFromForm()" class="w-full mt-2 bg-[var(--accent)] text-neutral-950 font-bold text-sm rounded-xl py-2.5 flex items-center justify-center gap-1.5 active:scale-[0.98] transition">
-          <i data-lucide="save" class="w-4 h-4"></i> Guardar Alterações
-        </button>
 
         <div class="flex items-center justify-between mt-4 pt-3 border-t border-neutral-800">
           <div class="pr-3">
@@ -5599,29 +5710,10 @@ function renderPerfil(){
             </select>
           </div>
         ` : ''}
-      </div>
 
-      <div class="card rounded-2xl p-4">
-        <div class="flex items-center gap-2 mb-1">
-          <i data-lucide="bot" class="w-4 h-4 text-[var(--accent)]"></i>
-          <h2 class="text-sm font-semibold text-white">Contexto do Coach</h2>
-        </div>
-        <p class="text-[11px] text-slate-500 mb-2 leading-relaxed">
-          Descreve os teus objetivos, lesões ou preferências. O coach terá sempre isto em conta em todas as conversas.
-        </p>
-        <textarea id="pfCoachCtx" rows="5"
-          placeholder="Ex: Quero correr uma meia maratona em Novembro. Tenho uma lesão no joelho direito. Objetivo: ganhar massa muscular mantendo o peso atual."
-          class="w-full bg-neutral-900 border border-neutral-800 rounded-xl px-3 py-2 text-sm text-white
-                 outline-none focus:border-[var(--accent)]/60 resize-none leading-relaxed
-                 placeholder-slate-600"
-        >${esc(p.coach_context||'')}</textarea>
-        <p id="pfCoachSaved" class="hidden text-[11px] text-emerald-400 flex items-center gap-1 mt-1">
-          <i data-lucide="check" class="w-3.5 h-3.5"></i> Guardado.
-        </p>
-        <button onclick="saveCoachContext()"
-          class="mt-2 w-full bg-[var(--accent)] text-neutral-950 font-bold text-sm rounded-xl py-2.5
-                 flex items-center justify-center gap-1.5 active:scale-[0.98] transition">
-          <i data-lucide="save" class="w-4 h-4"></i> Guardar Contexto
+        <p id="pfSaved" class="hidden text-[11px] text-emerald-400 flex items-center gap-1 mt-3"><i data-lucide="check" class="w-3.5 h-3.5"></i> Guardado.</p>
+        <button onclick="saveProfileFromForm()" class="w-full mt-2 bg-[var(--accent)] text-neutral-950 font-bold text-sm rounded-xl py-2.5 flex items-center justify-center gap-1.5 active:scale-[0.98] transition">
+          <i data-lucide="save" class="w-4 h-4"></i> Guardar
         </button>
       </div>
 
@@ -5652,16 +5744,6 @@ function renderPerfil(){
       </div>
     </div>
   `;
-}
-
-async function saveCoachContext() {
-  const ctx = (document.getElementById('pfCoachCtx')?.value || '').trim();
-  const { error } = await sb.from('profiles').update({ coach_context: ctx }).eq('id', currentUser.id);
-  if (!error) {
-    if (state.profile) state.profile.coach_context = ctx;
-    const el = document.getElementById('pfCoachSaved');
-    if (el) { el.classList.remove('hidden'); setTimeout(() => el.classList.add('hidden'), 2000); }
-  }
 }
 
 /* ============================= COACH ============================= */
@@ -5920,7 +6002,7 @@ async function confirmClearCoachConversation() {
 }
 
 /* ============================= ÁGUA (separador dentro de Nutrição) ============================= */
-const WATER_QUICK_AMOUNTS = [250, 500, 750]; // ml
+const WATER_QUICK_AMOUNTS = [200, 250, 300]; // ml
 const WATER_REMINDER_INTERVALS = [30, 60, 90, 120, 180, 240]; // minutos
 // "De 1 em 1h" / "De 30 em 30 min" — igual à forma como o próprio utilizador
 // descreveu o intervalo ("de 1h a 1h", "de 3h em 3h"), em vez de repetir a
@@ -6026,11 +6108,13 @@ function waterHomeCard(){
 // também vivem no Perfil (meta + lembretes ficam juntos, ver pedido do
 // utilizador), por isso decide qual das duas telas atualizar.
 function renderAguaInPlace(){
-  if (activeVertical !== 'nutricao') return;
   const main = document.getElementById('tab-content');
   if (!main) return;
-  if (activeTab === 'agua') main.innerHTML = renderAgua();
-  else if (activeTab === 'perfil') main.innerHTML = renderPerfil();
+  // A água aparece em três sítios (separador Água, Perfil, cartão da Home)
+  // — atualiza o que estiver mesmo visível, sem mexer nos outros.
+  if (activeVertical === 'home') main.innerHTML = renderHome();
+  else if (activeVertical === 'nutricao' && activeTab === 'agua') main.innerHTML = renderAgua();
+  else if (activeVertical === 'nutricao' && activeTab === 'perfil') main.innerHTML = renderPerfil();
   else return;
   if (window.lucide) lucide.createIcons();
 }

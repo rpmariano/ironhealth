@@ -421,6 +421,7 @@ function buildSystemInstruction(
   coachContext: string | null,
   biometrics: { height_cm: number | null; weight_kg: number | null; gender: string | null },
   nutritionSummary: string,
+  waterSummary: string,
   gymSummary: string | null,
   runningSummary: string | null,
   raceEventsContext: string | null,
@@ -467,6 +468,10 @@ function buildSystemInstruction(
     `Não forces este tópico se o utilizador perguntar algo completamente não relacionado (ex.: ` +
     `um alimento específico) — menciona a prova próxima apenas quando for relevante ou quando ` +
     `deres um conselho de treino/nutrição geral que deva ter isso em conta.\n\n` +
+    `MUITO IMPORTANTE — hidratação: tem sempre em conta o "Água hoje" no contexto abaixo ao dar ` +
+    `conselhos de treino ou nutrição (ex.: se a % da meta estiver baixa a meio/fim do dia, ou perto ` +
+    `de um treino/corrida, sugere beber água). Tal como as provas, não forces este tópico numa ` +
+    `pergunta que não tem nada a ver com hidratação — só o menciona quando for relevante.\n\n` +
     `Data atual: ${today}.\n\n` +
     `O contexto abaixo tem os dados de nutrição dos últimos 7 dias, os treinos de ginásio e as ` +
     `corridas dos últimos 30 dias. Se a pergunta do utilizador precisar de dados fora dessas ` +
@@ -492,6 +497,7 @@ function buildSystemInstruction(
   }
 
   sys += `\n\n${nutritionSummary}`;
+  sys += `\n\n${waterSummary}`;
   if (gymSummary) sys += `\n\n${gymSummary}`;
   if (runningSummary) sys += `\n\n${runningSummary}`;
   if (raceEventsContext) sys += `\n\n${raceEventsContext}`;
@@ -529,7 +535,7 @@ async function handler(req: Request): Promise<Response> {
     // ── Perfil do utilizador (contexto + metas + biometria) ──────────────
     const { data: profile } = await sb
       .from("profiles")
-      .select("coach_context, calorie_goal, protein_goal, carbs_goal, fat_goal, height_cm, weight_kg, gender")
+      .select("coach_context, calorie_goal, protein_goal, carbs_goal, fat_goal, water_goal_ml, height_cm, weight_kg, gender")
       .eq("id", userId)
       .maybeSingle();
 
@@ -592,6 +598,17 @@ async function handler(req: Request): Promise<Response> {
       `${todaySummary}\n\n` +
       `Histórico dos ${NUTRITION_WINDOW_DAYS - 1} dias anteriores (metas diárias: ${g.calorie_goal ?? "–"} kcal / ${g.protein_goal ?? "–"}g proteína / ${g.carbs_goal ?? "–"}g hidratos / ${g.fat_goal ?? "–"}g gordura):\n` +
       historyLines.join("\n");
+
+    // ── Água de hoje ──────────────────────────────────────────────────────
+    const { data: waterLogs } = await sb
+      .from("water_logs")
+      .select("amount_ml")
+      .eq("user_id", userId)
+      .eq("date", todayISO);
+    const waterTotalMl = (waterLogs || []).reduce((sum: number, w: { amount_ml: number }) => sum + (w.amount_ml || 0), 0);
+    const waterGoalMl = Number(g.water_goal_ml) || 2000;
+    const waterPct = waterGoalMl > 0 ? Math.round((waterTotalMl / waterGoalMl) * 100) : 0;
+    const waterSummary = `Água hoje: ${waterTotalMl} ml de ${waterGoalMl} ml (${waterPct}% da meta).`;
 
     // ── Treinos de ginásio dos últimos 30 dias ───────────────────────────
     // Janela maior que a nutrição porque os treinos são menos frequentes.
@@ -665,6 +682,7 @@ async function handler(req: Request): Promise<Response> {
         gender: (profile?.gender as string | null) ?? null,
       },
       nutritionSummary,
+      waterSummary,
       gymSummary,
       runningSummary,
       raceEventsContext,

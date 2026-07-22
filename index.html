@@ -137,6 +137,32 @@
   @keyframes pulse-soft { 0%,100%{opacity:1;} 50%{opacity:.45;} }
   .analyzing { animation: pulse-soft 1.2s ease-in-out infinite; }
 
+  /* "Copo" de água animado (separador Água + cartão de água do Início) —
+     duas ondas SVG desfasadas a deslizar em loop dão o efeito de líquido a
+     "chapinhar" em vez de uma barra estática. */
+  .water-glass { position:relative; margin:0 auto; border-radius:18px 18px 34px 34px;
+    border:2px solid rgba(56,189,248,.35); background:rgba(56,189,248,.06); overflow:hidden;
+    box-shadow: inset 0 0 24px rgba(56,189,248,.10); }
+  .water-glass-fill { position:absolute; left:-2px; right:-2px; bottom:0;
+    background:linear-gradient(180deg, #38bdf8, #0ea5e9); transition:height 1.1s cubic-bezier(.4,0,.2,1); }
+  .water-wave-svg { position:absolute; left:0; top:-9px; width:200%; height:18px; animation:waterWaveScroll 4.5s linear infinite; }
+  .water-wave-svg path { fill:#38bdf8; }
+  .water-wave-svg.w2 { animation-duration:7s; animation-direction:reverse; opacity:.55; top:-6px; }
+  .water-wave-svg.w2 path { fill:#0ea5e9; }
+  @keyframes waterWaveScroll { from{transform:translateX(0);} to{transform:translateX(-100px);} }
+  .water-glass-bubbles span { position:absolute; bottom:4px; border-radius:50%; background:rgba(255,255,255,.55); animation:waterBubbleRise 3.6s ease-in infinite; }
+  @keyframes waterBubbleRise { 0%{transform:translateY(0); opacity:0;} 18%{opacity:.8;} 100%{transform:translateY(-90%); opacity:0;} }
+  .water-glass-label { position:absolute; inset:0; display:flex; flex-direction:column; align-items:center; justify-content:center; pointer-events:none; }
+  .water-glass-ml { font-weight:800; color:#fff; text-shadow:0 1px 4px rgba(0,0,0,.45); line-height:1; }
+  .water-glass-ml small { font-weight:700; color:rgba(255,255,255,.75); margin-left:2px; }
+  .water-glass-pct { font-weight:700; color:rgba(255,255,255,.9); margin-top:3px; }
+
+  /* Cartão de água do Início: foge de propósito ao "gradiente + ícone/anel"
+     dos outros cartões — o cartão inteiro é o copo (ver .water-glass-fill/
+     .water-wave-svg acima, reaproveitados aqui num contentor maior). */
+  .water-home-card { background:linear-gradient(180deg, #0c1a24, #071019);
+    border:1px solid rgba(56,189,248,.25); min-height:172px; }
+
   input[type=number]::-webkit-inner-spin-button { opacity:1; }
 
   .no-scrollbar::-webkit-scrollbar { display:none; }
@@ -237,6 +263,8 @@
   <div id="toastStack" class="fixed top-0 inset-x-0 z-50 flex flex-col items-stretch gap-2 px-3 pt-3 pointer-events-none max-w-md mx-auto"></div>
 
   <div id="coachClearModal"></div>
+
+  <div id="waterMuteModal"></div>
 
   <div class="sticky top-0 z-20 bg-neutral-950/90 backdrop-blur border-b border-neutral-800">
     <header class="px-4 pt-4 pb-3 flex items-center justify-between">
@@ -1213,6 +1241,7 @@ async function saveProfileFromForm(){
     protein_goal: get('pfPro') > 0 ? get('pfPro') : state.profile.protein_goal,
     carbs_goal: get('pfCarb') > 0 ? get('pfCarb') : state.profile.carbs_goal,
     fat_goal: get('pfFat') > 0 ? get('pfFat') : state.profile.fat_goal,
+    water_goal_ml: get('pfWaterGoal') > 0 ? get('pfWaterGoal') : state.profile.water_goal_ml,
   };
   // Objetivos do módulo Corpo — um por métrica, todos opcionais (campo vazio
   // limpa o objetivo em vez de manter o valor anterior).
@@ -2671,6 +2700,8 @@ function renderHome(){
       ${nextRaceHomeCard()}
 
       ${nutritionHeroCard(totals, profile)}
+
+      ${waterHomeCard()}
 
       ${homeEditMode ? renderHomeEditPanel() : `
         ${layout.length ? `
@@ -5536,11 +5567,38 @@ function renderPerfil(){
             <input id="pfFat" type="number" min="1" value="${p.fat_goal||70}"
               class="w-full bg-neutral-900 border border-neutral-800 rounded-xl px-3 py-2 text-sm text-white outline-none focus:border-[var(--accent)]/60" />
           </div>
+          <div>
+            <label class="text-[11px] text-slate-500">Meta água (ml/dia)</label>
+            <input id="pfWaterGoal" type="number" min="1" step="50" value="${p.water_goal_ml||2000}"
+              class="w-full bg-neutral-900 border border-neutral-800 rounded-xl px-3 py-2 text-sm text-white outline-none focus:border-[var(--accent)]/60" />
+          </div>
         </div>
         <p id="pfSaved" class="hidden text-[11px] text-emerald-400 flex items-center gap-1 mt-2"><i data-lucide="check" class="w-3.5 h-3.5"></i> Guardado.</p>
         <button onclick="saveProfileFromForm()" class="w-full mt-2 bg-[var(--accent)] text-neutral-950 font-bold text-sm rounded-xl py-2.5 flex items-center justify-center gap-1.5 active:scale-[0.98] transition">
           <i data-lucide="save" class="w-4 h-4"></i> Guardar Alterações
         </button>
+
+        <div class="flex items-center justify-between mt-4 pt-3 border-t border-neutral-800">
+          <div class="pr-3">
+            <p class="text-xs font-semibold text-white flex items-center gap-1.5"><i data-lucide="bell" class="w-3.5 h-3.5" style="color:#38bdf8"></i> Lembretes de água</p>
+            <p class="text-[11px] text-slate-500 leading-relaxed mt-0.5">Notificação de X em X tempo enquanto não atingires a meta diária.</p>
+          </div>
+          <button onclick="toggleWaterReminder()" ${waterSubscribing ? 'disabled' : ''} type="button"
+            class="w-11 h-6 rounded-full relative transition shrink-0 disabled:opacity-50 ${p.water_reminder_enabled ? 'bg-[var(--accent)]' : 'bg-neutral-700'}">
+            <span class="absolute top-0.5 ${p.water_reminder_enabled ? 'left-5' : 'left-0.5'} w-5 h-5 rounded-full bg-white transition-all"></span>
+          </button>
+        </div>
+        ${p.water_reminder_enabled ? `
+          <div class="mt-2">
+            <label class="text-[11px] text-slate-500">De quanto em quanto tempo</label>
+            <select onchange="setWaterReminderInterval(this.value)"
+              class="w-full mt-1 bg-neutral-900 border border-neutral-800 rounded-xl px-3 py-2 text-sm text-white outline-none focus:border-[var(--accent)]/60">
+              ${WATER_REMINDER_INTERVALS.map(m => `
+                <option value="${m}" ${m === (Number(p.water_reminder_interval_minutes) || 120) ? 'selected' : ''}>${waterIntervalLabel(m)}</option>
+              `).join('')}
+            </select>
+          </div>
+        ` : ''}
       </div>
 
       <div class="card rounded-2xl p-4">
@@ -5864,6 +5922,13 @@ async function confirmClearCoachConversation() {
 /* ============================= ÁGUA (separador dentro de Nutrição) ============================= */
 const WATER_QUICK_AMOUNTS = [250, 500, 750]; // ml
 const WATER_REMINDER_INTERVALS = [30, 60, 90, 120, 180, 240]; // minutos
+// "De 1 em 1h" / "De 30 em 30 min" — igual à forma como o próprio utilizador
+// descreveu o intervalo ("de 1h a 1h", "de 3h em 3h"), em vez de repetir a
+// unidade duas vezes (ex.: "1h em 1h").
+function waterIntervalLabel(m){
+  const label = (m % 60 === 0) ? `${m / 60}h` : `${m} min`;
+  return `De ${label} em ${label}`;
+}
 
 function todayWaterLogs(){
   return waterLogs.filter(w => w.date === todayISO());
@@ -5875,11 +5940,98 @@ function waterGoalMl(){
   return Number(state.profile?.water_goal_ml) || 2000;
 }
 
+// "Copo" animado com ondulação — ver .water-glass no <style>. Duas ondas
+// SVG desfasadas em velocidade/direção dão o efeito de líquido em movimento
+// em vez de um preenchimento estático; as bolhas (posições fixas, delays
+// diferentes) reforçam a sensação de água "viva".
+const WATER_WAVE_PATH_1 = 'M0 10 C 25 20 25 0 50 10 S 75 0 100 10 S 125 20 150 10 S 175 0 200 10 V20 H0 Z';
+const WATER_WAVE_PATH_2 = 'M0 10 C 25 0 25 20 50 10 S 75 20 100 10 S 125 0 150 10 S 175 20 200 10 V20 H0 Z';
+function waterGlassVisual(total, goal, pct, size){
+  size = size || { w: 128, h: 156 };
+  return `
+    <div class="water-glass" style="width:${size.w}px;height:${size.h}px;">
+      <div class="water-glass-fill" style="height:${pct}%">
+        <svg class="water-wave-svg" viewBox="0 0 200 20" preserveAspectRatio="none"><path d="${WATER_WAVE_PATH_1}"/></svg>
+        <svg class="water-wave-svg w2" viewBox="0 0 200 20" preserveAspectRatio="none"><path d="${WATER_WAVE_PATH_2}"/></svg>
+      </div>
+      <div class="water-glass-bubbles">
+        <span style="left:28%; width:5px; height:5px; animation-delay:.2s"></span>
+        <span style="left:52%; width:4px; height:4px; animation-delay:1.4s"></span>
+        <span style="left:72%; width:3px; height:3px; animation-delay:2.3s"></span>
+      </div>
+      <div class="water-glass-label">
+        <span class="water-glass-ml text-2xl">${total}<small class="text-xs">ml</small></span>
+        <span class="water-glass-pct text-[11px]">${pct}% de ${goal} ml</span>
+      </div>
+    </div>`;
+}
+
+// Cartão de água do Início — propositadamente fora do padrão "gradiente +
+// ícone/anel" dos outros cartões (ver statCardBg): o próprio cartão é o
+// "copo", com a onda a subir de baixo para cima conforme a % da meta. Usa
+// <div>, não <button>, porque precisa de botões reais lá dentro (silenciar,
+// adição rápida) — um <button> não pode conter outro <button> em HTML válido.
+function waterHomeCard(){
+  const total = todayWaterTotalMl();
+  const goal = waterGoalMl();
+  const pct = goal > 0 ? Math.min(100, Math.round((total / goal) * 100)) : 0;
+  const p = state.profile || {};
+  const remindersOn = !!p.water_reminder_enabled;
+  const mutedToday = remindersOn && p.water_reminder_muted_date === todayISO();
+  const goalReached = goal > 0 && total >= goal;
+
+  return `
+    <div onclick="switchVertical('nutricao'); switchTab('agua');"
+      class="water-home-card w-full text-left rounded-3xl p-5 relative overflow-hidden active:scale-[0.99] transition cursor-pointer">
+      <div class="water-glass-fill" style="height:${pct}%">
+        <svg class="water-wave-svg" viewBox="0 0 200 20" preserveAspectRatio="none"><path d="${WATER_WAVE_PATH_1}"/></svg>
+        <svg class="water-wave-svg w2" viewBox="0 0 200 20" preserveAspectRatio="none"><path d="${WATER_WAVE_PATH_2}"/></svg>
+      </div>
+      <div class="water-glass-bubbles">
+        <span style="left:12%; width:5px; height:5px; animation-delay:.3s"></span>
+        <span style="left:38%; width:4px; height:4px; animation-delay:1.6s"></span>
+        <span style="left:64%; width:6px; height:6px; animation-delay:.9s"></span>
+        <span style="left:86%; width:3px; height:3px; animation-delay:2.4s"></span>
+      </div>
+
+      <div class="relative z-10 flex items-start justify-between gap-3">
+        <div class="min-w-0">
+          <p class="text-[11px] font-semibold text-white/70 uppercase tracking-wider mb-1">Água hoje</p>
+          <p class="text-3xl font-black text-white leading-none">${total}<span class="text-sm font-bold text-white/60"> /${goal} ml</span></p>
+          <p class="text-xs text-white/80 mt-1.5">${goalReached ? 'Meta atingida! 🎉' : `${pct}% da meta diária`}</p>
+        </div>
+        ${remindersOn ? `
+          <button onclick="event.stopPropagation(); ${mutedToday ? 'unmuteWaterReminderToday()' : 'openWaterMuteModal()'}" type="button"
+            title="${mutedToday ? 'Reativar lembretes' : 'Silenciar lembretes'}"
+            class="shrink-0 w-8 h-8 rounded-full bg-black/25 backdrop-blur flex items-center justify-center active:scale-90 transition">
+            <i data-lucide="${mutedToday ? 'bell-off' : 'bell'}" class="w-4 h-4 text-white"></i>
+          </button>
+        ` : ''}
+      </div>
+
+      <div class="relative z-10 flex gap-2 mt-4">
+        ${WATER_QUICK_AMOUNTS.map(ml => `
+          <button onclick="event.stopPropagation(); logWater(${ml})" ${waterBusy ? 'disabled' : ''} type="button"
+            class="text-[11px] font-semibold text-white bg-black/25 backdrop-blur rounded-full px-2.5 py-1.5 active:scale-95 transition disabled:opacity-50">
+            +${ml}
+          </button>
+        `).join('')}
+      </div>
+      ${mutedToday ? `<p class="relative z-10 text-[10px] text-white/60 mt-2">Lembretes silenciados até amanhã</p>` : ''}
+    </div>`;
+}
+
+// Re-renderiza o ecrã atual sem perder scroll/foco fora dele — usada tanto
+// pelas ações do separador Água como pelos controlos de lembretes que agora
+// também vivem no Perfil (meta + lembretes ficam juntos, ver pedido do
+// utilizador), por isso decide qual das duas telas atualizar.
 function renderAguaInPlace(){
-  if (activeVertical !== 'nutricao' || activeTab !== 'agua') return;
+  if (activeVertical !== 'nutricao') return;
   const main = document.getElementById('tab-content');
   if (!main) return;
-  main.innerHTML = renderAgua();
+  if (activeTab === 'agua') main.innerHTML = renderAgua();
+  else if (activeTab === 'perfil') main.innerHTML = renderPerfil();
+  else return;
   if (window.lucide) lucide.createIcons();
 }
 
@@ -5930,16 +6082,6 @@ async function removeWaterLog(id){
     showToast('error', null, 'Não foi possível remover o registo.');
     renderAguaInPlace();
   }
-}
-
-async function saveWaterGoal(ml){
-  const n = Math.round(Number(ml));
-  if (!Number.isFinite(n) || n <= 0) { showToast('error', null, 'Meta inválida.'); return; }
-  const { error } = await sb.from('profiles').update({ water_goal_ml: n }).eq('id', currentUser.id);
-  if (error) { showToast('error', null, 'Não foi possível guardar a meta.'); return; }
-  state.profile.water_goal_ml = n;
-  showToast('success', null, 'Meta atualizada.');
-  renderAguaInPlace();
 }
 
 async function setWaterReminderInterval(minutes){
@@ -6014,33 +6156,94 @@ async function toggleWaterReminder(){
   }
   const nowIso = new Date().toISOString();
   const patch = { water_reminder_enabled: enabling };
-  if (enabling) patch.water_last_activity_at = nowIso; // começa a contagem já, não do último registo antigo
+  if (enabling) {
+    patch.water_last_activity_at = nowIso; // começa a contagem já, não do último registo antigo
+    patch.water_reminder_muted_date = null; // um "silenciar resto do dia" antigo não deve sobreviver a reativar
+  }
   const { error } = await sb.from('profiles').update(patch).eq('id', currentUser.id);
   if (error) { showToast('error', null, 'Não foi possível guardar.'); renderAguaInPlace(); return; }
   state.profile.water_reminder_enabled = enabling;
-  if (enabling) state.profile.water_last_activity_at = nowIso;
+  if (enabling) {
+    state.profile.water_last_activity_at = nowIso;
+    state.profile.water_reminder_muted_date = null;
+  }
   showToast('success', null, enabling ? 'Lembretes de água ativados.' : 'Lembretes de água desativados.');
   renderAguaInPlace();
+}
+
+// Modal "Silenciar lembrete" — aberto a partir do cartão de água do Início.
+// Duas opções, sem afetar o toggle geral (definido no Perfil): adiar só o
+// próximo (reaproveita water_last_activity_at, o mesmo campo que "beber água"
+// já usa para reiniciar a contagem) ou silenciar até ao fim do dia
+// (water_reminder_muted_date, ver send-water-reminders).
+function openWaterMuteModal(){
+  const el = document.getElementById('waterMuteModal');
+  if (!el) return;
+  el.innerHTML = `
+    <div class="fixed inset-0 z-[60] bg-black/70 flex items-center justify-center px-6"
+         onclick="if(event.target===this) closeWaterMuteModal()">
+      <div class="bg-neutral-900 border border-neutral-800 rounded-2xl p-5 max-w-xs w-full">
+        <p class="text-sm font-bold text-white mb-1">Silenciar lembretes de água</p>
+        <p class="text-xs text-slate-400 mb-4 leading-relaxed">Queres saltar só o próximo aviso, ou desligar por hoje?</p>
+        <div class="space-y-2">
+          <button onclick="snoozeWaterReminder('next')"
+            class="w-full border border-neutral-700 text-slate-200 text-xs font-semibold rounded-xl py-2.5">
+            Só o próximo
+          </button>
+          <button onclick="snoozeWaterReminder('today')"
+            class="w-full border border-sky-500/40 text-sky-400 text-xs font-semibold rounded-xl py-2.5">
+            Resto do dia
+          </button>
+          <button onclick="closeWaterMuteModal()"
+            class="w-full text-slate-500 text-xs font-semibold rounded-xl py-2">
+            Cancelar
+          </button>
+        </div>
+      </div>
+    </div>
+  `;
+}
+function closeWaterMuteModal(){
+  const el = document.getElementById('waterMuteModal');
+  if (el) el.innerHTML = '';
+}
+async function snoozeWaterReminder(scope){
+  closeWaterMuteModal();
+  if (scope === 'next') {
+    const nowIso = new Date().toISOString();
+    const { error } = await sb.from('profiles').update({ water_last_activity_at: nowIso }).eq('id', currentUser.id);
+    if (error) { showToast('error', null, 'Não foi possível adiar o lembrete.'); return; }
+    state.profile.water_last_activity_at = nowIso;
+    showToast('success', null, 'Próximo lembrete adiado.');
+  } else {
+    const today = todayISO();
+    const { error } = await sb.from('profiles').update({ water_reminder_muted_date: today }).eq('id', currentUser.id);
+    if (error) { showToast('error', null, 'Não foi possível silenciar.'); return; }
+    state.profile.water_reminder_muted_date = today;
+    showToast('success', null, 'Lembretes silenciados até amanhã.');
+  }
+  render();
+}
+async function unmuteWaterReminderToday(){
+  const { error } = await sb.from('profiles').update({ water_reminder_muted_date: null }).eq('id', currentUser.id);
+  if (!error) {
+    state.profile.water_reminder_muted_date = null;
+    showToast('success', null, 'Lembretes reativados.');
+    render();
+  }
 }
 
 function renderAgua(){
   const total = todayWaterTotalMl();
   const goal = waterGoalMl();
   const pct = goal > 0 ? Math.min(100, Math.round((total / goal) * 100)) : 0;
-  const p = state.profile || {};
   const todayEntries = todayWaterLogs();
-  const reminderOn = !!p.water_reminder_enabled;
-  const interval = Number(p.water_reminder_interval_minutes) || 120;
 
   return `
     <div class="space-y-4 fade-in">
-      <div class="rounded-2xl p-5 text-center" style="${statCardBg('#38bdf8')}">
-        <p class="text-[11px] font-semibold text-slate-500 uppercase tracking-wide mb-1">Água hoje</p>
-        <p class="text-4xl font-black text-white">${total}<span class="text-lg font-bold text-slate-500"> ml</span></p>
-        <p class="text-xs text-slate-500 mt-1">${pct}% da meta de ${goal} ml</p>
-        <div class="w-full h-2 bg-neutral-800 rounded-full overflow-hidden mt-3">
-          <div class="h-full rounded-full transition-all" style="width:${pct}%; background:#38bdf8;"></div>
-        </div>
+      <div class="rounded-2xl p-5" style="${statCardBg('#38bdf8')}">
+        <p class="text-[11px] font-semibold text-slate-500 uppercase tracking-wide mb-3 text-center">Água hoje</p>
+        ${waterGlassVisual(total, goal, pct)}
       </div>
 
       <div class="grid grid-cols-3 gap-2">
@@ -6081,42 +6284,11 @@ function renderAgua(){
         </div>
       ` : ''}
 
-      <div class="card rounded-2xl p-4 space-y-3">
-        <h2 class="text-xs font-semibold text-slate-500 uppercase tracking-wide">Definições</h2>
-
-        <div>
-          <label class="text-[11px] text-slate-500">Meta diária (ml)</label>
-          <div class="flex gap-2 mt-1">
-            <input id="waterGoalInput" type="number" min="1" step="50" value="${goal}"
-              class="flex-1 bg-neutral-900 border border-neutral-800 rounded-xl px-3 py-2 text-sm text-white outline-none focus:border-[var(--accent)]/60" />
-            <button onclick="saveWaterGoal(document.getElementById('waterGoalInput').value)" type="button"
-              class="shrink-0 border border-neutral-700 text-slate-300 text-xs font-semibold rounded-xl px-3">Guardar</button>
-          </div>
-        </div>
-
-        <div class="flex items-center justify-between pt-2 border-t border-neutral-800">
-          <div class="pr-3">
-            <p class="text-xs font-semibold text-white">Lembretes</p>
-            <p class="text-[11px] text-slate-500 leading-relaxed">Notificação de X em X tempo se ainda não tiveres registado água.</p>
-          </div>
-          <button onclick="toggleWaterReminder()" ${waterSubscribing ? 'disabled' : ''} type="button"
-            class="w-11 h-6 rounded-full relative transition shrink-0 disabled:opacity-50 ${reminderOn ? 'bg-[var(--accent)]' : 'bg-neutral-700'}">
-            <span class="absolute top-0.5 ${reminderOn ? 'left-5' : 'left-0.5'} w-5 h-5 rounded-full bg-white transition-all"></span>
-          </button>
-        </div>
-
-        ${reminderOn ? `
-          <div>
-            <label class="text-[11px] text-slate-500">De quanto em quanto tempo</label>
-            <select onchange="setWaterReminderInterval(this.value)"
-              class="w-full mt-1 bg-neutral-900 border border-neutral-800 rounded-xl px-3 py-2 text-sm text-white outline-none focus:border-[var(--accent)]/60">
-              ${WATER_REMINDER_INTERVALS.map(m => `
-                <option value="${m}" ${m === interval ? 'selected' : ''}>${m < 60 ? m + ' min' : (m/60) + 'h'}</option>
-              `).join('')}
-            </select>
-          </div>
-        ` : ''}
-      </div>
+      <button onclick="goToPerfil()" type="button"
+        class="w-full text-left flex items-center justify-between bg-neutral-900/60 border border-neutral-800 rounded-xl px-3.5 py-3">
+        <span class="text-xs text-slate-400">Meta diária e lembretes definem-se no Perfil</span>
+        <i data-lucide="chevron-right" class="w-4 h-4 text-slate-600 shrink-0"></i>
+      </button>
     </div>
   `;
 }

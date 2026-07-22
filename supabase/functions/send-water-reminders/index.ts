@@ -44,18 +44,38 @@ async function handler(req: Request): Promise<Response> {
   );
 
   try {
+    const todayISO = new Date().toISOString().slice(0, 10);
+
     const { data: profiles, error: profilesErr } = await sb
       .from("profiles")
-      .select("id, water_reminder_interval_minutes, water_last_activity_at")
+      .select("id, water_goal_ml, water_reminder_interval_minutes, water_last_activity_at, water_reminder_muted_date")
       .eq("water_reminder_enabled", true);
     if (profilesErr) return jsonResponse({ error: profilesErr.message }, 500);
 
     const now = Date.now();
-    const due = (profiles || []).filter((p) => {
+    // "Resto do dia" silencia sem tocar em water_reminder_enabled — fica
+    // marcado só até à data guardada; no dia seguinte esta condição já não
+    // bate certo e os lembretes retomam sozinhos, sem limpeza nenhuma.
+    const dueByTime = (profiles || []).filter((p) => {
+      if (p.water_reminder_muted_date === todayISO) return false;
       const intervalMs = (p.water_reminder_interval_minutes || DEFAULT_INTERVAL_MINUTES) * 60000;
       const lastMs = p.water_last_activity_at ? new Date(p.water_last_activity_at).getTime() : 0;
       return now - lastMs >= intervalMs;
     });
+
+    // Quem já bateu a meta de hoje não precisa de mais lembretes — verifica-se
+    // à parte (não dá para filtrar isto numa única query, é por utilizador).
+    const due: typeof dueByTime = [];
+    for (const profile of dueByTime) {
+      const { data: todayLogs } = await sb
+        .from("water_logs")
+        .select("amount_ml")
+        .eq("user_id", profile.id)
+        .eq("date", todayISO);
+      const todayTotal = (todayLogs || []).reduce((sum, l) => sum + (l.amount_ml || 0), 0);
+      const goal = Number(profile.water_goal_ml) || 2000;
+      if (todayTotal < goal) due.push(profile);
+    }
 
     let sent = 0;
     let failed = 0;

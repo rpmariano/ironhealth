@@ -50,28 +50,34 @@
      subtil sem voltar ao castanho. O cartão "Hoje"/módulos usam --tile-base-*
      (quente, fixo) para se destacarem como o único elemento em cor forte. */
   html:not(.light) {
-    --surf-950: color-mix(in srgb, var(--accent) 2%, #0f1116);
-    --surf-900: color-mix(in srgb, var(--accent) 3%, #181b21);
-    --surf-800: color-mix(in srgb, var(--accent) 4%, #22262e);
-    --surf-700: color-mix(in srgb, var(--accent) 5%, #2c313a);
-    --brd-700:  color-mix(in srgb, var(--accent-dark) 14%, #3a4049);
-    --brd-800:  color-mix(in srgb, var(--accent-dark) 10%, #2a2f37);
-    --brd-900:  color-mix(in srgb, var(--accent-dark) 8%, #1c2027);
-    --page-bg:  color-mix(in srgb, var(--accent-dark) 6%, #111318);
-    --input-bg: color-mix(in srgb, var(--accent) 6%, #363c45);
-    --grain-opacity: 0.06;
+    --surf-950: color-mix(in srgb, var(--accent) 3%, #171a21);
+    --surf-900: color-mix(in srgb, var(--accent) 4%, #1f232c);
+    --surf-800: color-mix(in srgb, var(--accent) 6%, #2a2f3a);
+    --surf-700: color-mix(in srgb, var(--accent) 9%, #363c48);
+    --brd-700:  color-mix(in srgb, var(--accent) 20%, #4b515e);
+    --brd-800:  color-mix(in srgb, var(--accent-dark) 16%, #383e49);
+    --brd-900:  color-mix(in srgb, var(--accent-dark) 10%, #262b33);
+    --page-bg:  color-mix(in srgb, var(--accent-dark) 8%, #16181f);
+    --input-bg: color-mix(in srgb, var(--accent) 9%, #3f4552);
+    --grain-opacity: 0.05;
+    --card-shadow: 0 1px 0 0 rgba(255,255,255,.07) inset, 0 -1px 0 0 rgba(0,0,0,.4) inset, 0 12px 28px -12px rgba(0,0,0,.6), 0 2px 6px rgba(0,0,0,.4);
+    --groove-shadow: inset 0 1px 4px rgba(0,0,0,.5), inset 0 -1px 0 rgba(255,255,255,.03);
+    --thumb-shadow: 0 2px 5px rgba(0,0,0,.4), 0 1px 0 rgba(255,255,255,.18) inset;
   }
   html.light {
-    --surf-950: #f6f8fb;
+    --surf-950: #eef1f6;
     --surf-900: #ffffff;
-    --surf-800: #eef2f7;
-    --surf-700: #e2e8f1;
-    --brd-700:  #ccd4df;
-    --brd-800:  #dde4ec;
-    --brd-900:  #e6ebf2;
-    --page-bg:  #f6f8fb;
+    --surf-800: #e9edf3;
+    --surf-700: #dbe2ec;
+    --brd-700:  #b9c3d1;
+    --brd-800:  #d3dae4;
+    --brd-900:  #e1e7ee;
+    --page-bg:  #eaeef4;
     --input-bg: #eef2f7;
     --grain-opacity: 0.02;
+    --card-shadow: 0 1px 0 0 rgba(255,255,255,.8) inset, 0 8px 20px -10px rgba(15,23,42,.14), 0 1px 3px rgba(15,23,42,.06);
+    --groove-shadow: inset 0 1px 3px rgba(15,23,42,.1);
+    --thumb-shadow: 0 2px 5px rgba(15,23,42,.18), 0 1px 0 rgba(255,255,255,.5) inset;
   }
 
   html, body { background:var(--page-bg); }
@@ -89,7 +95,7 @@
   }
   #root, #app, body > div { position:relative; z-index:1; }
 
-  .card { background:linear-gradient(180deg, var(--surf-800), var(--surf-950)); border:1px solid var(--brd-700); filter:drop-shadow(0 2px 8px rgba(0,0,0,0.35)); }
+  .card { background:linear-gradient(180deg, var(--surf-800), var(--surf-950)); border:1px solid var(--brd-700); box-shadow:var(--card-shadow); }
 
   [class~="bg-neutral-950"],
   [class*="bg-neutral-950/"] { background-color:var(--surf-950) !important; }
@@ -114,7 +120,8 @@
   /* Submenu Dashboard/Calendário (Nutrição, Corpo, Ginásio) e Registo/Agenda
      (Corrida): pílula com indicador que desliza entre as duas opções em vez
      de trocar instantaneamente de cor. */
-  .seg-thumb { transition: transform .28s cubic-bezier(.4,0,.2,1); }
+  .seg-nav { box-shadow: var(--groove-shadow); }
+  .seg-thumb { transition: transform .28s cubic-bezier(.4,0,.2,1); box-shadow: var(--thumb-shadow); }
   .seg-nav:has(.seg-btn[data-tab="calendario"].active) .seg-thumb,
   .seg-nav:has(.seg-btn[data-tab="agenda"].active) .seg-thumb { transform: translateX(100%); }
   /* translateX é relativo à largura do próprio thumb, não do contentor — por
@@ -161,8 +168,7 @@
   /* Cartão de água do Início: foge de propósito ao "gradiente + ícone/anel"
      dos outros cartões — o cartão inteiro é o copo (ver .water-glass-fill/
      .water-wave-svg acima, reaproveitados aqui num contentor maior). */
-  .water-home-card { background:linear-gradient(180deg, #0c1a24, #071019);
-    border:1px solid rgba(56,189,248,.25); min-height:172px; }
+  .water-home-card { min-height:172px; }
 
   input[type=number]::-webkit-inner-spin-button { opacity:1; }
 
@@ -191,7 +197,6 @@
 
   /* ===== Tema claro ===== */
   html.light { color-scheme: only light; }
-  html.light .card { filter:drop-shadow(0 1px 4px rgba(0,0,0,0.08)); }
   html.light .sticky.top-0 { background:color-mix(in srgb, var(--surf-950) 95%, transparent); }
   html.light #bottomNav > div { background:color-mix(in srgb, var(--surf-950) 97%, transparent); }
 
@@ -6065,7 +6070,7 @@ function waterHomeCard(){
 
   return `
     <div onclick="switchVertical('nutricao'); switchTab('agua');"
-      class="water-home-card w-full text-left rounded-3xl p-5 relative overflow-hidden active:scale-[0.99] transition cursor-pointer">
+      class="water-home-card w-full text-left rounded-3xl p-5 relative overflow-hidden active:scale-[0.99] transition cursor-pointer" style="${statCardBg('#38bdf8')}">
       <div class="water-glass-fill" style="height:${pct}%">
         <svg class="water-wave-svg" viewBox="0 0 200 20" preserveAspectRatio="none"><path d="${WATER_WAVE_PATH_1}"/></svg>
         <svg class="water-wave-svg w2" viewBox="0 0 200 20" preserveAspectRatio="none"><path d="${WATER_WAVE_PATH_2}"/></svg>
@@ -6079,14 +6084,14 @@ function waterHomeCard(){
 
       <div class="relative z-10 flex items-start justify-between gap-3">
         <div class="min-w-0">
-          <p class="text-[11px] font-semibold text-white/70 uppercase tracking-wider mb-1">Água hoje</p>
-          <p class="text-3xl font-black text-white leading-none">${total}<span class="text-sm font-bold text-white/60"> /${goal} ml</span></p>
-          <p class="text-xs text-white/80 mt-1.5">${goalReached ? 'Meta atingida! 🎉' : `${pct}% da meta diária`}</p>
+          <p class="text-[11px] font-semibold text-slate-500 uppercase tracking-wider mb-1">Água hoje</p>
+          <p class="text-3xl font-black text-white leading-none">${total}<span class="text-sm font-bold text-slate-400"> /${goal} ml</span></p>
+          <p class="text-xs text-slate-400 mt-1.5">${goalReached ? 'Meta atingida! 🎉' : `${pct}% da meta diária`}</p>
         </div>
         ${remindersOn ? `
           <button onclick="event.stopPropagation(); ${mutedToday ? 'unmuteWaterReminderToday()' : 'openWaterMuteModal()'}" type="button"
             title="${mutedToday ? 'Reativar lembretes' : 'Silenciar lembretes'}"
-            class="shrink-0 w-8 h-8 rounded-full bg-black/25 backdrop-blur flex items-center justify-center active:scale-90 transition">
+            class="shrink-0 w-8 h-8 rounded-full bg-neutral-800 border border-neutral-700 flex items-center justify-center active:scale-90 transition">
             <i data-lucide="${mutedToday ? 'bell-off' : 'bell'}" class="w-4 h-4 text-white"></i>
           </button>
         ` : ''}
@@ -6094,13 +6099,13 @@ function waterHomeCard(){
 
       <div class="relative z-10 flex gap-2 mt-4">
         ${WATER_QUICK_AMOUNTS.map(ml => `
-          <button onclick="event.stopPropagation(); logWater(${ml})" ${waterBusy ? 'disabled' : ''} type="button"
-            class="text-[11px] font-semibold text-white bg-black/25 backdrop-blur rounded-full px-2.5 py-1.5 active:scale-95 transition disabled:opacity-50">
+          <button onclick="event.stopPropagation(); logWater(${ml})" ${waterBusy ? 'disabled' : ''} type="button" data-water-busy-btn
+            class="text-[11px] font-semibold text-white bg-neutral-800 border border-neutral-700 rounded-full px-2.5 py-1.5 active:scale-95 transition disabled:opacity-50">
             +${ml}
           </button>
         `).join('')}
       </div>
-      ${mutedToday ? `<p class="relative z-10 text-[10px] text-white/60 mt-2">Lembretes silenciados até amanhã</p>` : ''}
+      ${mutedToday ? `<p class="relative z-10 text-[10px] text-slate-500 mt-2">Lembretes silenciados até amanhã</p>` : ''}
     </div>`;
 }
 
@@ -6140,12 +6145,24 @@ async function logWater(amountMl){
     const nowIso = new Date().toISOString();
     await sb.from('profiles').update({ water_last_activity_at: nowIso }).eq('id', currentUser.id);
     if (state.profile) state.profile.water_last_activity_at = nowIso;
+    // Sem voltar a desenhar o ecrã todo aqui: o otimista já mostra o valor
+    // certo, e um 2º render tão a seguir ao 1º destruía e recriava a onda
+    // animada e os ícones, dando um "flash" duplo. Só reativa os botões.
+    waterBusy = false;
+    setWaterButtonsBusy(false);
   } catch(e) {
     waterLogs = waterLogs.filter(w => w.id !== tempId);
     showToast('error', null, e.message || 'Não foi possível registar a água.');
+    waterBusy = false;
+    renderAguaInPlace();
   }
-  waterBusy = false;
-  renderAguaInPlace();
+}
+
+function setWaterButtonsBusy(busy){
+  document.querySelectorAll('[data-water-busy-btn]').forEach(btn => {
+    btn.disabled = busy;
+    btn.classList.toggle('opacity-50', busy);
+  });
 }
 
 function logCustomWaterAmount(){
@@ -6333,7 +6350,7 @@ function renderAgua(){
 
       <div class="grid grid-cols-3 gap-2">
         ${WATER_QUICK_AMOUNTS.map(ml => `
-          <button onclick="logWater(${ml})" ${waterBusy ? 'disabled' : ''} type="button"
+          <button onclick="logWater(${ml})" ${waterBusy ? 'disabled' : ''} type="button" data-water-busy-btn
             class="flex flex-col items-center gap-1 bg-neutral-900/60 border border-neutral-800 rounded-xl py-3 active:scale-95 transition disabled:opacity-50">
             <i data-lucide="droplet" class="w-4 h-4" style="color:#38bdf8"></i>
             <span class="text-xs font-semibold text-white">${ml} ml</span>
@@ -6344,7 +6361,7 @@ function renderAgua(){
       <div class="flex gap-2">
         <input id="waterCustomAmount" type="number" min="1" placeholder="Outra quantidade (ml)"
           class="flex-1 bg-neutral-900 border border-neutral-800 rounded-xl px-3 py-2.5 text-sm text-white outline-none focus:border-[var(--accent)]/60" />
-        <button onclick="logCustomWaterAmount()" ${waterBusy ? 'disabled' : ''} type="button"
+        <button onclick="logCustomWaterAmount()" ${waterBusy ? 'disabled' : ''} type="button" data-water-busy-btn
           class="shrink-0 bg-[var(--accent)] text-neutral-950 font-bold text-xs rounded-xl px-4 disabled:opacity-50">
           + Adicionar
         </button>

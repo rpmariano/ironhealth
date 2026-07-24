@@ -6128,34 +6128,47 @@ function renderAguaInPlace(){
 // UI otimista igual ao padrão já usado no Coach: mostra logo o registo, e
 // desfaz se a escrita na BD falhar — sem isto, cada copo bebido tinha um
 // atraso visível até aparecer.
+// tempId -> Promise<linha real ou null> — permite a removeWaterLog esperar
+// que uma inserção otimista termine antes de tentar apagar, em vez de
+// mandar o id falso do cliente para o Supabase (que falhava sempre, só
+// funcionando à 2ª tentativa, já com o id real atribuído).
+let waterPendingInserts = {};
+
 async function logWater(amountMl){
   if (waterBusy || !amountMl || amountMl <= 0) return;
   waterBusy = true;
   const tempId = '__tmp_water__' + Date.now();
   waterLogs = [{ id: tempId, user_id: currentUser.id, date: todayISO(), amount_ml: amountMl, created_at: new Date().toISOString() }, ...waterLogs];
   renderAguaInPlace();
-  try {
-    const { data, error } = await sb.from('water_logs')
-      .insert({ user_id: currentUser.id, date: todayISO(), amount_ml: amountMl })
-      .select().single();
-    if (error) throw error;
-    waterLogs = waterLogs.map(w => w.id === tempId ? data : w);
-    // Beber conta como "atividade" — reinicia a contagem do próximo lembrete
-    // (ver send-water-reminders: usa este campo para saber se já é devido).
-    const nowIso = new Date().toISOString();
-    await sb.from('profiles').update({ water_last_activity_at: nowIso }).eq('id', currentUser.id);
-    if (state.profile) state.profile.water_last_activity_at = nowIso;
-    // Sem voltar a desenhar o ecrã todo aqui: o otimista já mostra o valor
-    // certo, e um 2º render tão a seguir ao 1º destruía e recriava a onda
-    // animada e os ícones, dando um "flash" duplo. Só reativa os botões.
-    waterBusy = false;
-    setWaterButtonsBusy(false);
-  } catch(e) {
-    waterLogs = waterLogs.filter(w => w.id !== tempId);
-    showToast('error', null, e.message || 'Não foi possível registar a água.');
-    waterBusy = false;
-    renderAguaInPlace();
-  }
+  const insertPromise = (async () => {
+    try {
+      const { data, error } = await sb.from('water_logs')
+        .insert({ user_id: currentUser.id, date: todayISO(), amount_ml: amountMl })
+        .select().single();
+      if (error) throw error;
+      waterLogs = waterLogs.map(w => w.id === tempId ? data : w);
+      // Beber conta como "atividade" — reinicia a contagem do próximo lembrete
+      // (ver send-water-reminders: usa este campo para saber se já é devido).
+      const nowIso = new Date().toISOString();
+      await sb.from('profiles').update({ water_last_activity_at: nowIso }).eq('id', currentUser.id);
+      if (state.profile) state.profile.water_last_activity_at = nowIso;
+      // Sem voltar a desenhar o ecrã todo aqui: o otimista já mostra o valor
+      // certo, e um 2º render tão a seguir ao 1º destruía e recriava a onda
+      // animada e os ícones, dando um "flash" duplo. Só reativa os botões.
+      waterBusy = false;
+      setWaterButtonsBusy(false);
+      return data;
+    } catch(e) {
+      waterLogs = waterLogs.filter(w => w.id !== tempId);
+      showToast('error', null, e.message || 'Não foi possível registar a água.');
+      waterBusy = false;
+      renderAguaInPlace();
+      return null;
+    } finally {
+      delete waterPendingInserts[tempId];
+    }
+  })();
+  waterPendingInserts[tempId] = insertPromise;
 }
 
 function setWaterButtonsBusy(busy){
@@ -6175,6 +6188,14 @@ function logCustomWaterAmount(){
 }
 
 async function removeWaterLog(id){
+  // Se o registo ainda estiver a ser criado (id temporário do otimista),
+  // espera que a inserção termine para saber o id real antes de apagar —
+  // caso contrário o delete ia com o id falso e falhava sempre.
+  if (waterPendingInserts[id]) {
+    const real = await waterPendingInserts[id];
+    if (!real) return; // inserção falhou entretanto — já não há nada para apagar
+    id = real.id;
+  }
   const prev = waterLogs;
   waterLogs = waterLogs.filter(w => w.id !== id);
   renderAguaInPlace();
